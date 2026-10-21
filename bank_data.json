@@ -1,0 +1,185 @@
+{
+  "customers": [
+    {
+      "id": "CUST-001",
+      "firstName": "Rahul",
+      "lastName": "Sharma",
+      "email": "rahul.sharma@example.com",
+      "phone": "9876543210"
+    },
+    {
+      "id": "CUST-002",
+      "firstName": "Priya",
+      "lastName": "Patel",
+      "email": "priya.patel@example.com",
+      "phone": "9876543211"
+    },
+    {
+      "id": "CUST-003",
+      "firstName": "Amit",
+      "lastName": "Kumar",
+      "email": "amit.kumar@example.com",
+      "phone": "9876543212"
+    }
+  ],
+  "accounts": [
+    {
+      "id": "ACC-001",
+      "customerId": "CUST-001",
+      "accountNumber": "1001000001",
+      "accountType": "savings",
+      "balance": 50000.0,
+      "overdraftEnabled": false,
+      "overdraftLimit": 0.0,
+      "status": "active",
+      "createdAt": "2026-10-21T11:57:11.000Z"
+    },
+    {
+      "id": "ACC-002",
+      "customerId": "CUST-001",
+      "accountNumber": "1001000002",
+      "accountType": "current",
+      "balance": 150000.0,
+      "overdraftEnabled": true,
+      "overdraftLimit": 50000.0,
+      "status": "active",
+      "createdAt": "2026-10-21T11:57:11.000Z"
+    },
+    {
+      "id": "ACC-003",
+      "customerId": "CUST-002",
+      "accountNumber": "1001000003",
+      "accountType": "savings",
+      "balance": 75000.0,
+      "overdraftEnabled": false,
+      "overdraftLimit": 0.0,
+      "status": "active",
+      "createdAt": "2026-10-21T11:57:11.000Z"
+    },
+    {
+      "id": "ACC-004",
+      "customerId": "CUST-003",
+      "accountNumber": "1001000004",
+      "accountType": "savings",
+      "balance": 25000.0,
+      "overdraftEnabled": false,
+      "overdraftLimit": 0.0,
+      "status": "active",
+      "createdAt": "2026-10-21T11:57:11.000Z"
+    }
+  ],
+  "transactions": [
+    {
+      "id": "TXN-001",
+      "accountId": "ACC-001",
+      "accountNumber": "1001000001",
+      "type": "deposit",
+      "direction": "credit",
+      "amount": 60000.0,
+      "balance": 60000.0,
+      "description": "Initial account opening deposit",
+      "referenceId": null,
+      "timestamp": "2026-01-10T09:35:00.000Z",
+      "prevHash": "GENESIS",
+      "hash": "8b29eed2da4eef545138d22981fe47b29886ac9624d96c4050098a0d25054d8d"
+    },
+    {
+      "id": "TXN-002",
+      "accountId": "ACC-001",
+      "accountNumber": "1001000001",
+      "type": "withdrawal",
+      "direction": "debit",
+      "amount": 10000.0,
+      "balance": 50000.0,
+      "description": "ATM cash withdrawal",
+      "referenceId": null,
+      "timestamp": "2026-01-14T14:20:00.000Z",
+      "prevHash": "8b29eed2da4eef545138d22981fe47b29886ac9624d96c4050098a0d25054d8d",
+      "hash": "b4dba9265667a44f6ee300b87f3ddf4e1baa9cab9e68aaca36a53bf9a9ee2531"
+    },
+    {
+      "id": "TXN-003",
+      "accountId": "ACC-002",
+      "accountNumber": "1001000002",
+      "type": "deposit",
+      "direction": "credit",
+      "amount": 200000.0,
+      "balance": 200000.0,
+      "description": "Business invoice deposit",
+      "referenceId": null,
+      "timestamp": "2026-01-11T11:15:00.000Z",
+      "prevHash": "b4dba9265667a44f6ee300b87f3ddf4e1baa9cab9e68aaca36a53bf9a9ee2531",
+      "hash": "b81693d0e6178ae91540b713714c75fb9f5c5345cbcfd5bd392cdf6dd157b17d"
+    },
+    {
+      "id": "TXN-004",
+      "accountId": "ACC-002",
+      "accountNumber": "1001000002",
+      "type": "withdrawal",
+      "direction": "debit",
+      "amount": 50000.0,
+      "balance": 150000.0,
+      "description": "Vendor payment",
+      "referenceId": null,
+      "timestamp": "2026-01-16T16:45:00.000Z",
+      "prevHash": "b81693d0e6178ae91540b713714c75fb9f5c5345cbcfd5bd392cdf6dd157b17d",
+      "hash": "5e99c3484af5f8e7096ac81650fdf25f72c5a1f105130a4b7948139d9f287d08"
+    },
+    {
+      "id": "TXN-005",
+      "accountId": "ACC-003",
+      "accountNumber": "1001000003",
+      "type": "deposit",
+      "direction": "credit",
+      "amount": 70000.0,
+      "balance": 70000.0,
+      "description": "Initial account opening deposit",
+      "referenceId": null,
+      "timestamp": "2026-01-12T11:05:00.000Z",
+      "prevHash": "5e99c3484af5f8e7096ac81650fdf25f72c5a1f105130a4b7948139d9f287d08",
+      "hash": "d9c926d0b9cbbc2b83b002273e71ccb7defc5552f76fd310109fdd88baf0e0ca"
+    },
+    {
+      "id": "TXN-006",
+      "accountId": "ACC-004",
+      "accountNumber": "1001000004",
+      "type": "deposit",
+      "direction": "credit",
+      "amount": 30000.0,
+      "balance": 30000.0,
+      "description": "Initial savings deposit",
+      "referenceId": null,
+      "timestamp": "2026-01-15T15:05:00.000Z",
+      "prevHash": "d9c926d0b9cbbc2b83b002273e71ccb7defc5552f76fd310109fdd88baf0e0ca",
+      "hash": "ae405e64acca7aaa7b7ebf21828bdcfb783afb3d0a062c17f6b2ce3b5b0f8f85"
+    },
+    {
+      "id": "TXN-007",
+      "accountId": "ACC-004",
+      "accountNumber": "1001000004",
+      "type": "transfer",
+      "direction": "debit",
+      "amount": 5000.0,
+      "balance": 25000.0,
+      "description": "Transfer to ACC-003",
+      "referenceId": "ACC-003",
+      "timestamp": "2026-01-18T10:10:00.000Z",
+      "prevHash": "ae405e64acca7aaa7b7ebf21828bdcfb783afb3d0a062c17f6b2ce3b5b0f8f85",
+      "hash": "f31fe6b580b5cf2f3a31e86441c710ec8c4c5e9e997613f9b48d503b7ec5177f"
+    },
+    {
+      "id": "TXN-008",
+      "accountId": "ACC-003",
+      "accountNumber": "1001000003",
+      "type": "transfer",
+      "direction": "credit",
+      "amount": 5000.0,
+      "balance": 75000.0,
+      "description": "Transfer from ACC-004",
+      "referenceId": "ACC-004",
+      "timestamp": "2026-01-18T10:10:00.000Z",
+      "prevHash": "f31fe6b580b5cf2f3a31e86441c710ec8c4c5e9e997613f9b48d503b7ec5177f",
+      "hash": "c8d82048f6bbef326368021193e585f2aea465f7c7758b4d3e4acfd00956d0e8"
+    }
+  ]
+}
