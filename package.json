@@ -2,9 +2,12 @@
   "name": "corebanking-sandbox-root",
   "version": "1.0.0",
   "private": true,
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "install:backend": "cd backend && npm install",
-    "install:frontend": "cd frontend && npm install",
+    "install:frontend": "cd frontend && npm install --include=dev",
     "build:frontend": "cd frontend && npm run build",
     "build": "npm run install:backend && npm run install:frontend && npm run build:frontend",
     "start": "node backend/src/server.js"
