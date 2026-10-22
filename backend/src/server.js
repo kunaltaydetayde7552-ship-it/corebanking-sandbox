@@ -15,6 +15,7 @@ const { PORT, NODE_ENV } = require('./config');
 const requestLogger = require('./middleware/requestLogger');
 const errorHandler = require('./middleware/errorHandler');
 const routes = require('./routes');
+const { initDatabase } = require('./models/schema');
 
 const app = express();
 
@@ -75,14 +76,20 @@ app.use(errorHandler);
 
 // Start Server if executed directly
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log('================================================');
-    console.log(` CoreBanking Sandbox API`);
-    console.log(` Server listening on: http://localhost:${PORT}`);
-    console.log(` Environment: ${NODE_ENV}`);
-    console.log(` API Base URL: http://localhost:${PORT}/api`);
-    console.log('================================================');
-  });
+  initDatabase()
+    .catch((err) => {
+      console.error('Failed to initialize database on startup:', err.message);
+    })
+    .finally(() => {
+      app.listen(PORT, () => {
+        console.log('================================================');
+        console.log(` CoreBanking Sandbox API`);
+        console.log(` Server listening on: http://localhost:${PORT}`);
+        console.log(` Environment: ${NODE_ENV}`);
+        console.log(` API Base URL: http://localhost:${PORT}/api`);
+        console.log('================================================');
+      });
+    });
 }
 
 module.exports = app;

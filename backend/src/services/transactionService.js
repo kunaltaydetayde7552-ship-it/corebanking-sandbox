@@ -1,28 +1,42 @@
+const db = require('../config/db');
 const store = require('../models/store');
-const { isPositiveNumber, isValidTransactionType } = require('../utils/validators');
+const { isPositiveNumber } = require('../utils/validators');
 
-/**
- * Custom error helper
- */
 const createError = (message, statusCode = 400) => {
   const error = new Error(message);
   error.statusCode = statusCode;
   return error;
 };
 
-/**
- * Helper to find account by ID or Account Number
- */
-const findAccount = (idOrNumber) => {
-  if (!idOrNumber) return null;
-  const target = String(idOrNumber).trim();
-  return store.accounts.find((a) => a.id === target || a.accountNumber === target);
-};
+const mapTxnRow = (row) => ({
+  id: row.id,
+  accountId: row.account_id,
+  accountNumber: row.account_number,
+  type: row.type,
+  direction: row.direction,
+  amount: parseFloat(row.amount),
+  balance: parseFloat(row.balance),
+  description: row.description,
+  referenceId: row.reference_id,
+  timestamp: row.timestamp ? row.timestamp.toISOString() : '',
+  prevHash: row.prev_hash,
+  hash: row.hash
+});
 
-/**
- * Generate next transaction ID like TXN-001, TXN-009, etc.
- */
-const generateTxnId = () => {
+const generateTxnId = async () => {
+  if (db.isDbConnected()) {
+    const res = await db.query("SELECT id FROM transactions WHERE id ~ '^TXN-[0-9]+$'");
+    let maxId = 0;
+    for (const r of res.rows) {
+      const match = r.id.match(/^TXN-(\d+)$/i);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxId) maxId = num;
+      }
+    }
+    return `TXN-${String(maxId + 1).padStart(3, '0')}`;
+  }
+
   let maxId = 0;
   for (const t of store.transactions) {
     const match = t.id && t.id.match(/^TXN-(\d+)$/i);
@@ -31,159 +45,116 @@ const generateTxnId = () => {
       if (num > maxId) maxId = num;
     }
   }
-  const nextNum = maxId + 1;
-  return `TXN-${String(nextNum).padStart(3, '0')}`;
+  return `TXN-${String(maxId + 1).padStart(3, '0')}`;
 };
 
-/**
- * Get transactions by account with optional filters & pagination
- */
-const getTransactionsByAccountId = async (accountId, filters = {}) => {
-  const account = findAccount(accountId);
-  if (!account) {
-    throw createError(`Account '${accountId}' not found`, 404);
-  }
-
-  let txns = store.transactions.filter((t) => t.accountId === account.id);
-
-  const { type, startDate, endDate, page = 1, limit = 10 } = filters;
-
-  if (type) {
-    const lowerType = String(type).trim().toLowerCase();
-    txns = txns.filter((t) => t.type.toLowerCase() === lowerType);
-  }
-
-  if (startDate) {
-    const start = new Date(startDate);
-    if (!isNaN(start.getTime())) {
-      txns = txns.filter((t) => new Date(t.timestamp) >= start);
-    }
-  }
-
-  if (endDate) {
-    const end = new Date(endDate);
-    if (!isNaN(end.getTime())) {
-      // Set to end of day if only date is provided
-      if (endDate.length <= 10) {
-        end.setHours(23, 5, 59, 999);
-      }
-      txns = txns.filter((t) => new Date(t.timestamp) <= end);
-    }
-  }
-
-  // Sort descending by timestamp
-  txns.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
-  const total = txns.length;
-  const currentPage = Math.max(1, parseInt(page, 10) || 1);
-  const itemsPerPage = Math.max(1, parseInt(limit, 10) || 10);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const pagedTransactions = txns.slice(startIndex, startIndex + itemsPerPage);
-
-  return {
-    account: {
-      id: account.id,
-      accountNumber: account.accountNumber,
-      accountType: account.accountType,
-      balance: account.balance,
-      status: account.status
-    },
-    transactions: pagedTransactions,
-    total,
-    page: currentPage,
-    limit: itemsPerPage
-  };
-};
-
-/**
- * Get all transactions with optional filters & pagination
- */
 const getAllTransactions = async (filters = {}) => {
+  if (db.isDbConnected()) {
+    let queryText = 'SELECT * FROM transactions WHERE 1=1';
+    const params = [];
+
+    if (filters.accountId) {
+      params.push(filters.accountId);
+      queryText += ` AND (account_id = $${params.length} OR account_number = $${params.length})`;
+    }
+    if (filters.type) {
+      params.push(filters.type.toLowerCase());
+      queryText += ` AND LOWER(type) = $${params.length}`;
+    }
+    if (filters.startDate) {
+      params.push(filters.startDate);
+      queryText += ` AND timestamp >= $${params.length}`;
+    }
+    if (filters.endDate) {
+      params.push(filters.endDate);
+      queryText += ` AND timestamp <= $${params.length}`;
+    }
+
+    queryText += ' ORDER BY timestamp DESC';
+    const res = await db.query(queryText, params);
+    const txns = res.rows.map(mapTxnRow);
+
+    const total = txns.length;
+    const page = Math.max(1, parseInt(filters.page, 10) || 1);
+    const limit = Math.max(1, parseInt(filters.limit, 10) || 10);
+    const paged = txns.slice((page - 1) * limit, page * limit);
+
+    return { transactions: paged, total, page, limit };
+  }
+
   let txns = [...store.transactions];
-
   const { accountId, type, startDate, endDate, page = 1, limit = 10 } = filters;
-
   if (accountId) {
-    const account = findAccount(accountId);
-    if (account) {
-      txns = txns.filter((t) => t.accountId === account.id);
-    } else {
-      txns = [];
-    }
+    txns = txns.filter(t => t.accountId === accountId || t.accountNumber === accountId);
   }
-
   if (type) {
-    const lowerType = String(type).trim().toLowerCase();
-    txns = txns.filter((t) => t.type.toLowerCase() === lowerType);
+    txns = txns.filter(t => t.type.toLowerCase() === type.toLowerCase());
   }
-
-  if (startDate) {
-    const start = new Date(startDate);
-    if (!isNaN(start.getTime())) {
-      txns = txns.filter((t) => new Date(t.timestamp) >= start);
-    }
-  }
-
-  if (endDate) {
-    const end = new Date(endDate);
-    if (!isNaN(end.getTime())) {
-      if (endDate.length <= 10) {
-        end.setHours(23, 5, 59, 999);
-      }
-      txns = txns.filter((t) => new Date(t.timestamp) <= end);
-    }
-  }
-
-  // Sort descending by timestamp
   txns.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-
   const total = txns.length;
-  const currentPage = Math.max(1, parseInt(page, 10) || 1);
-  const itemsPerPage = Math.max(1, parseInt(limit, 10) || 10);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const pagedTransactions = txns.slice(startIndex, startIndex + itemsPerPage);
-
-  return {
-    transactions: pagedTransactions,
-    total,
-    page: currentPage,
-    limit: itemsPerPage
-  };
+  const paged = txns.slice((page - 1) * limit, page * limit);
+  return { transactions: paged, total, page, limit };
 };
 
-/**
- * Perform a deposit transaction
- */
+const getTransactionsByAccountId = async (accountId, filters = {}) => {
+  return getAllTransactions({ ...filters, accountId });
+};
+
 const deposit = async (accountId, amount, description) => {
-  if (!accountId) {
-    throw createError('accountId is required');
-  }
-
-  if (!isPositiveNumber(amount)) {
-    throw createError('Deposit amount must be a positive number greater than 0');
-  }
-
-  const account = findAccount(accountId);
-  if (!account) {
-    throw createError(`Account '${accountId}' not found`, 404);
-  }
-
-  if (account.status !== 'active') {
-    throw createError(
-      `Cannot perform deposit on an account with status '${account.status}'. Account must be 'active'.`,
-      400
-    );
-  }
+  if (!accountId) throw createError('accountId is required');
+  if (!isPositiveNumber(amount)) throw createError('Deposit amount must be a positive number greater than 0');
 
   const numAmount = Number(Number(amount).toFixed(2));
+
+  if (db.isDbConnected()) {
+    const accRes = await db.query('SELECT * FROM accounts WHERE id = $1 OR account_number = $1', [accountId]);
+    if (accRes.rows.length === 0) throw createError(`Account '${accountId}' not found`, 404);
+    const account = accRes.rows[0];
+
+    if (account.status !== 'active') {
+      throw createError(`Cannot perform deposit on account with status '${account.status}'`, 400);
+    }
+
+    const newBalance = Number((parseFloat(account.balance) + numAmount).toFixed(2));
+    await db.query('UPDATE accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newBalance, account.id]);
+
+    const txnId = await generateTxnId();
+    const lastTxnRes = await db.query('SELECT hash FROM transactions ORDER BY timestamp DESC LIMIT 1');
+    const prevHash = lastTxnRes.rows.length > 0 ? lastTxnRes.rows[0].hash : 'GENESIS';
+    const txnData = {
+      id: txnId,
+      accountId: account.id,
+      amount: numAmount,
+      type: 'deposit',
+      direction: 'credit',
+      timestamp: new Date().toISOString()
+    };
+    const hash = store.calculateHash(prevHash, txnData);
+
+    const insTxn = await db.query(`
+      INSERT INTO transactions (id, account_id, account_number, type, direction, amount, balance, description, reference_id, prev_hash, hash)
+      VALUES ($1, $2, $3, 'deposit', 'credit', $4, $5, $6, NULL, $7, $8)
+      RETURNING *
+    `, [txnId, account.id, account.account_number, numAmount, newBalance, description ? String(description).trim() : 'Account deposit', prevHash, hash]);
+
+    return {
+      transaction: mapTxnRow(insTxn.rows[0]),
+      account: {
+        id: account.id,
+        accountNumber: account.account_number,
+        balance: newBalance,
+        status: account.status
+      }
+    };
+  }
+
+  // In-memory fallback
+  const account = store.accounts.find(a => a.id === accountId || a.accountNumber === accountId);
+  if (!account) throw createError(`Account '${accountId}' not found`, 404);
   account.balance = Number((account.balance + numAmount).toFixed(2));
-  const timestamp = store.getTimestamp();
-  account.updatedAt = timestamp;
-
-  const txnId = generateTxnId();
+  const txnId = `TXN-${String(store.transactions.length + 1).padStart(3, '0')}`;
   const prevHash = store.transactions.length > 0 ? store.transactions[store.transactions.length - 1].hash : 'GENESIS';
-
-  const transaction = {
+  const txn = {
     id: txnId,
     accountId: account.id,
     accountNumber: account.accountNumber,
@@ -191,79 +162,87 @@ const deposit = async (accountId, amount, description) => {
     direction: 'credit',
     amount: numAmount,
     balance: account.balance,
-    description: description ? String(description).trim() : 'Account deposit',
+    description: description || 'Account deposit',
     referenceId: null,
-    timestamp
+    timestamp: store.getTimestamp()
   };
-
-  transaction.hash = store.calculateHash(prevHash, transaction);
-  transaction.prevHash = prevHash;
-
-  store.transactions.push(transaction);
-
-  return {
-    transaction,
-    account: {
-      id: account.id,
-      accountNumber: account.accountNumber,
-      balance: account.balance,
-      overdraftEnabled: account.overdraftEnabled || false,
-      overdraftLimit: account.overdraftLimit || 0,
-      status: account.status
-    }
-  };
+  txn.hash = store.calculateHash(prevHash, txn);
+  txn.prevHash = prevHash;
+  store.transactions.push(txn);
+  return { transaction: txn, account };
 };
 
-/**
- * Perform a withdrawal transaction
- */
 const withdraw = async (accountId, amount, description) => {
-  if (!accountId) {
-    throw createError('accountId is required');
-  }
-
-  if (!isPositiveNumber(amount)) {
-    throw createError('Withdrawal amount must be a positive number greater than 0');
-  }
-
-  const account = findAccount(accountId);
-  if (!account) {
-    throw createError(`Account '${accountId}' not found`, 404);
-  }
-
-  if (account.status !== 'active') {
-    throw createError(
-      `Cannot perform withdrawal on an account with status '${account.status}'. Account must be 'active'.`,
-      400
-    );
-  }
+  if (!accountId) throw createError('accountId is required');
+  if (!isPositiveNumber(amount)) throw createError('Withdrawal amount must be a positive number greater than 0');
 
   const numAmount = Number(Number(amount).toFixed(2));
-  const availableLimit = account.overdraftEnabled ? (account.overdraftLimit || 0) : 0;
-  const maxAvailable = Number((account.balance + availableLimit).toFixed(2));
 
-  if (numAmount > maxAvailable) {
-    if (account.overdraftEnabled) {
-      throw createError(
-        `Withdrawal blocked. ${account.accountNumber} has ₹${account.balance.toFixed(2)} balance and ₹${availableLimit.toFixed(2)} overdraft (Total available: ₹${maxAvailable.toFixed(2)}). Requested: ₹${numAmount.toFixed(2)}`,
-        400
-      );
-    } else {
-      throw createError(
-        `Withdrawal blocked. ${account.accountNumber} has ₹${account.balance.toFixed(2)} available and no overdraft.`,
-        400
-      );
+  if (db.isDbConnected()) {
+    const accRes = await db.query('SELECT * FROM accounts WHERE id = $1 OR account_number = $1', [accountId]);
+    if (accRes.rows.length === 0) throw createError(`Account '${accountId}' not found`, 404);
+    const account = accRes.rows[0];
+
+    if (account.status !== 'active') {
+      throw createError(`Cannot perform withdrawal on account with status '${account.status}'`, 400);
     }
+
+    const currentBal = parseFloat(account.balance);
+    const odLimit = account.overdraft_enabled ? parseFloat(account.overdraft_limit || 0) : 0;
+    const maxAvailable = Number((currentBal + odLimit).toFixed(2));
+
+    if (numAmount > maxAvailable) {
+      if (account.overdraft_enabled) {
+        throw createError(`Withdrawal blocked. ${account.account_number} has ₹${currentBal.toFixed(2)} balance and ₹${odLimit.toFixed(2)} overdraft (Total available: ₹${maxAvailable.toFixed(2)}).`, 400);
+      } else {
+        throw createError(`Withdrawal blocked. ${account.account_number} has ₹${currentBal.toFixed(2)} available and no overdraft.`, 400);
+      }
+    }
+
+    const newBalance = Number((currentBal - numAmount).toFixed(2));
+    await db.query('UPDATE accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newBalance, account.id]);
+
+    const txnId = await generateTxnId();
+    const lastTxnRes = await db.query('SELECT hash FROM transactions ORDER BY timestamp DESC LIMIT 1');
+    const prevHash = lastTxnRes.rows.length > 0 ? lastTxnRes.rows[0].hash : 'GENESIS';
+    const txnData = {
+      id: txnId,
+      accountId: account.id,
+      amount: numAmount,
+      type: 'withdrawal',
+      direction: 'debit',
+      timestamp: new Date().toISOString()
+    };
+    const hash = store.calculateHash(prevHash, txnData);
+
+    const insTxn = await db.query(`
+      INSERT INTO transactions (id, account_id, account_number, type, direction, amount, balance, description, reference_id, prev_hash, hash)
+      VALUES ($1, $2, $3, 'withdrawal', 'debit', $4, $5, $6, NULL, $7, $8)
+      RETURNING *
+    `, [txnId, account.id, account.account_number, numAmount, newBalance, description ? String(description).trim() : 'Account withdrawal', prevHash, hash]);
+
+    return {
+      transaction: mapTxnRow(insTxn.rows[0]),
+      account: {
+        id: account.id,
+        accountNumber: account.account_number,
+        balance: newBalance,
+        status: account.status
+      }
+    };
   }
 
+  // In-memory fallback
+  const account = store.accounts.find(a => a.id === accountId || a.accountNumber === accountId);
+  if (!account) throw createError(`Account '${accountId}' not found`, 404);
+  const odLimit = account.overdraftEnabled ? (account.overdraftLimit || 0) : 0;
+  if (numAmount > (account.balance + odLimit)) {
+    throw createError(`Withdrawal blocked. Insufficient available funds.`, 400);
+  }
   account.balance = Number((account.balance - numAmount).toFixed(2));
-  const timestamp = store.getTimestamp();
-  account.updatedAt = timestamp;
-
-  const txnId = generateTxnId();
+  const txnId = `TXN-${String(store.transactions.length + 1).padStart(3, '0')}`;
   const prevHash = store.transactions.length > 0 ? store.transactions[store.transactions.length - 1].hash : 'GENESIS';
-
-  const transaction = {
+  const txn = {
     id: txnId,
     accountId: account.id,
     accountNumber: account.accountNumber,
@@ -271,257 +250,184 @@ const withdraw = async (accountId, amount, description) => {
     direction: 'debit',
     amount: numAmount,
     balance: account.balance,
-    description: description ? String(description).trim() : 'Account withdrawal',
+    description: description || 'Account withdrawal',
     referenceId: null,
-    timestamp
+    timestamp: store.getTimestamp()
   };
-
-  transaction.hash = store.calculateHash(prevHash, transaction);
-  transaction.prevHash = prevHash;
-
-  store.transactions.push(transaction);
-
-  return {
-    transaction,
-    account: {
-      id: account.id,
-      accountNumber: account.accountNumber,
-      balance: account.balance,
-      overdraftEnabled: account.overdraftEnabled || false,
-      overdraftLimit: account.overdraftLimit || 0,
-      status: account.status
-    }
-  };
+  txn.hash = store.calculateHash(prevHash, txn);
+  txn.prevHash = prevHash;
+  store.transactions.push(txn);
+  return { transaction: txn, account };
 };
 
-/**
- * Perform a funds transfer between two accounts
- */
 const transfer = async (fromAccountId, toAccountId, amount, description) => {
-  if (!fromAccountId || !toAccountId) {
-    throw createError('Both fromAccountId and toAccountId are required');
-  }
-
-  if (!isPositiveNumber(amount)) {
-    throw createError('Enter an amount greater than ₹0.00.');
-  }
-
-  const fromAccount = findAccount(fromAccountId);
-  if (!fromAccount) {
-    throw createError(`Source account '${fromAccountId}' not found`, 404);
-  }
-
-  const toAccount = findAccount(toAccountId);
-  if (!toAccount) {
-    throw createError(`Destination account '${toAccountId}' not found`, 404);
-  }
-
-  if (fromAccount.id === toAccount.id) {
-    throw createError('Choose two different accounts to transfer between.', 400);
-  }
-
-  if (fromAccount.status !== 'active') {
-    throw createError(
-      `Source account '${fromAccount.accountNumber}' is not active (status: '${fromAccount.status}')`,
-      400
-    );
-  }
-
-  if (toAccount.status !== 'active') {
-    throw createError(
-      `Destination account '${toAccount.accountNumber}' is not active (status: '${toAccount.status}')`,
-      400
-    );
-  }
+  if (!fromAccountId || !toAccountId) throw createError('Both fromAccountId and toAccountId are required');
+  if (!isPositiveNumber(amount)) throw createError('Enter an amount greater than ₹0.00.');
 
   const numAmount = Number(Number(amount).toFixed(2));
-  const availableLimit = fromAccount.overdraftEnabled ? (fromAccount.overdraftLimit || 0) : 0;
-  const maxAvailable = Number((fromAccount.balance + availableLimit).toFixed(2));
 
-  if (numAmount > maxAvailable) {
-    if (fromAccount.overdraftEnabled) {
-      throw createError(
-        `Transfer blocked. ${fromAccount.accountNumber} has ₹${fromAccount.balance.toFixed(2)} balance with ₹${availableLimit.toFixed(2)} overdraft (Total available: ₹${maxAvailable.toFixed(2)}).`,
-        400
-      );
-    } else {
-      throw createError(
-        `Transfer blocked. ${fromAccount.accountNumber} has ₹${fromAccount.balance.toFixed(2)} available and no overdraft.`,
-        400
-      );
+  if (db.isDbConnected()) {
+    const fromRes = await db.query('SELECT * FROM accounts WHERE id = $1 OR account_number = $1', [fromAccountId]);
+    if (fromRes.rows.length === 0) throw createError(`Source account '${fromAccountId}' not found`, 404);
+    const fromAcc = fromRes.rows[0];
+
+    const toRes = await db.query('SELECT * FROM accounts WHERE id = $1 OR account_number = $1', [toAccountId]);
+    if (toRes.rows.length === 0) throw createError(`Destination account '${toAccountId}' not found`, 404);
+    const toAcc = toRes.rows[0];
+
+    if (fromAcc.id === toAcc.id) throw createError('Choose two different accounts to transfer between.', 400);
+    if (fromAcc.status !== 'active') throw createError(`Source account '${fromAcc.account_number}' is not active`, 400);
+    if (toAcc.status !== 'active') throw createError(`Destination account '${toAcc.account_number}' is not active`, 400);
+
+    const fromBal = parseFloat(fromAcc.balance);
+    const odLimit = fromAcc.overdraft_enabled ? parseFloat(fromAcc.overdraft_limit || 0) : 0;
+    const maxAvailable = Number((fromBal + odLimit).toFixed(2));
+
+    if (numAmount > maxAvailable) {
+      if (fromAcc.overdraft_enabled) {
+        throw createError(`Transfer blocked. ${fromAcc.account_number} has ₹${fromBal.toFixed(2)} balance with ₹${odLimit.toFixed(2)} overdraft (Total available: ₹${maxAvailable.toFixed(2)}).`, 400);
+      } else {
+        throw createError(`Transfer blocked. ${fromAcc.account_number} has ₹${fromBal.toFixed(2)} available and no overdraft.`, 400);
+      }
     }
+
+    const newFromBal = Number((fromBal - numAmount).toFixed(2));
+    const newToBal = Number((parseFloat(toAcc.balance) + numAmount).toFixed(2));
+
+    await db.query('UPDATE accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newFromBal, fromAcc.id]);
+    await db.query('UPDATE accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newToBal, toAcc.id]);
+
+    const dId = await generateTxnId();
+    const cNum = parseInt(dId.replace('TXN-', ''), 10) + 1;
+    const cId = `TXN-${String(cNum).padStart(3, '0')}`;
+
+    const lastTxnRes = await db.query('SELECT hash FROM transactions ORDER BY timestamp DESC LIMIT 1');
+    const prevHash1 = lastTxnRes.rows.length > 0 ? lastTxnRes.rows[0].hash : 'GENESIS';
+
+    const dData = {
+      id: dId,
+      accountId: fromAcc.id,
+      amount: numAmount,
+      type: 'transfer',
+      direction: 'debit',
+      timestamp: new Date().toISOString()
+    };
+    const dHash = store.calculateHash(prevHash1, dData);
+
+    const cData = {
+      id: cId,
+      accountId: toAcc.id,
+      amount: numAmount,
+      type: 'transfer',
+      direction: 'credit',
+      timestamp: dData.timestamp
+    };
+    const cHash = store.calculateHash(dHash, cData);
+
+    const dIns = await db.query(`
+      INSERT INTO transactions (id, account_id, account_number, type, direction, amount, balance, description, reference_id, prev_hash, hash)
+      VALUES ($1, $2, $3, 'transfer', 'debit', $4, $5, $6, $7, $8, $9)
+      RETURNING *
+    `, [dId, fromAcc.id, fromAcc.account_number, numAmount, newFromBal, description || `Transfer to ${toAcc.account_number}`, toAcc.id, prevHash1, dHash]);
+
+    const cIns = await db.query(`
+      INSERT INTO transactions (id, account_id, account_number, type, direction, amount, balance, description, reference_id, prev_hash, hash)
+      VALUES ($1, $2, $3, 'transfer', 'credit', $4, $5, $6, $7, $8, $9)
+      RETURNING *
+    `, [cId, toAcc.id, toAcc.account_number, numAmount, newToBal, description || `Transfer from ${fromAcc.account_number}`, fromAcc.id, dHash, cHash]);
+
+    return {
+      transferDebit: mapTxnRow(dIns.rows[0]),
+      transferCredit: mapTxnRow(cIns.rows[0]),
+      fromAccount: { id: fromAcc.id, accountNumber: fromAcc.account_number, balance: newFromBal, status: fromAcc.status },
+      toAccount: { id: toAcc.id, accountNumber: toAcc.account_number, balance: newToBal, status: toAcc.status }
+    };
   }
 
-  // Update balances atomically
-  fromAccount.balance = Number((fromAccount.balance - numAmount).toFixed(2));
-  toAccount.balance = Number((toAccount.balance + numAmount).toFixed(2));
-
-  const timestamp = store.getTimestamp();
-  fromAccount.updatedAt = timestamp;
-  toAccount.updatedAt = timestamp;
-
-  // Create debit and credit records
-  const debitTxnId = generateTxnId();
-  const creditTxnId = `TXN-${String(parseInt(debitTxnId.replace('TXN-', ''), 10) + 1).padStart(3, '0')}`;
-
-  const prevHash1 = store.transactions.length > 0 ? store.transactions[store.transactions.length - 1].hash : 'GENESIS';
-
-  const debitTxn = {
-    id: debitTxnId,
-    accountId: fromAccount.id,
-    accountNumber: fromAccount.accountNumber,
-    type: 'transfer',
-    direction: 'debit',
-    amount: numAmount,
-    balance: fromAccount.balance,
-    description: description
-      ? String(description).trim()
-      : `Transfer to ${toAccount.accountNumber}`,
-    referenceId: toAccount.id,
-    counterpartyAccountNumber: toAccount.accountNumber,
-    relatedTransactionId: creditTxnId,
-    timestamp
-  };
-  debitTxn.hash = store.calculateHash(prevHash1, debitTxn);
-  debitTxn.prevHash = prevHash1;
-
-  const creditTxn = {
-    id: creditTxnId,
-    accountId: toAccount.id,
-    accountNumber: toAccount.accountNumber,
-    type: 'transfer',
-    direction: 'credit',
-    amount: numAmount,
-    balance: toAccount.balance,
-    description: description
-      ? String(description).trim()
-      : `Transfer from ${fromAccount.accountNumber}`,
-    referenceId: fromAccount.id,
-    counterpartyAccountNumber: fromAccount.accountNumber,
-    relatedTransactionId: debitTxnId,
-    timestamp
-  };
-  creditTxn.hash = store.calculateHash(debitTxn.hash, creditTxn);
-  creditTxn.prevHash = debitTxn.hash;
-
-  store.transactions.push(debitTxn);
-  store.transactions.push(creditTxn);
-
-  return {
-    transferDebit: debitTxn,
-    transferCredit: creditTxn,
-    fromAccount: {
-      id: fromAccount.id,
-      accountNumber: fromAccount.accountNumber,
-      balance: fromAccount.balance,
-      overdraftEnabled: fromAccount.overdraftEnabled || false,
-      overdraftLimit: fromAccount.overdraftLimit || 0,
-      status: fromAccount.status
-    },
-    toAccount: {
-      id: toAccount.id,
-      accountNumber: toAccount.accountNumber,
-      balance: toAccount.balance,
-      overdraftEnabled: toAccount.overdraftEnabled || false,
-      overdraftLimit: toAccount.overdraftLimit || 0,
-      status: toAccount.status
-    }
-  };
+  // In-memory fallback
+  return store.transfer(fromAccountId, toAccountId, amount, description);
 };
 
-/**
- * Generate full account statement with opening balance, running balances, debits, credits, and closing balance
- */
 const getAccountStatement = async (accountId, filters = {}) => {
-  const account = findAccount(accountId);
-  if (!account) {
-    throw createError(`Account '${accountId}' not found`, 404);
-  }
+  if (db.isDbConnected()) {
+    const accRes = await db.query('SELECT * FROM accounts WHERE id = $1 OR account_number = $1', [accountId]);
+    if (accRes.rows.length === 0) throw createError(`Account '${accountId}' not found`, 404);
+    const account = accRes.rows[0];
 
-  // All chronological transactions for this account
-  const allAccountTxns = store.transactions
-    .filter((t) => t.accountId === account.id)
-    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+    const allTxnsRes = await db.query('SELECT * FROM transactions WHERE account_id = $1 ORDER BY timestamp ASC', [account.id]);
+    const allAccountTxns = allTxnsRes.rows.map(mapTxnRow);
 
-  const { startDate, endDate, type } = filters;
-  const start = startDate ? new Date(startDate).getTime() : null;
-  const end = endDate ? new Date(endDate).setHours(23, 59, 59, 999) : null;
+    const { startDate, endDate, type } = filters;
+    const start = startDate ? new Date(startDate).getTime() : null;
+    const end = endDate ? new Date(endDate).setHours(23, 59, 59, 999) : null;
 
-  // Compute opening balance before startDate
-  let openingBalance = 0;
-  if (start) {
-    for (const t of allAccountTxns) {
-      const tTime = new Date(t.timestamp).getTime();
-      if (tTime < start) {
-        if (t.direction === 'credit') {
-          openingBalance = Number((openingBalance + t.amount).toFixed(2));
-        } else if (t.direction === 'debit') {
-          openingBalance = Number((openingBalance - t.amount).toFixed(2));
+    let openingBalance = 0;
+    if (start) {
+      for (const t of allAccountTxns) {
+        const tTime = new Date(t.timestamp).getTime();
+        if (tTime < start) {
+          if (t.direction === 'credit') openingBalance = Number((openingBalance + t.amount).toFixed(2));
+          else if (t.direction === 'debit') openingBalance = Number((openingBalance - t.amount).toFixed(2));
         }
       }
     }
-  }
 
-  // Filter transactions within range
-  let statementTxns = allAccountTxns.filter((t) => {
-    const tTime = new Date(t.timestamp).getTime();
-    if (start && tTime < start) return false;
-    if (end && tTime > end) return false;
-    if (type && type !== 'ALL') {
-      if (t.type.toLowerCase() !== type.toLowerCase()) return false;
-    }
-    return true;
-  });
+    const filtered = allAccountTxns.filter((t) => {
+      const tTime = new Date(t.timestamp).getTime();
+      if (start && tTime < start) return false;
+      if (end && tTime > end) return false;
+      if (type && type !== 'ALL') {
+        if (t.type.toLowerCase() !== type.toLowerCase()) return false;
+      }
+      return true;
+    });
 
-  // Calculate running balance for each row
-  let running = openingBalance;
-  let totalDebits = 0;
-  let totalCredits = 0;
+    let running = openingBalance;
+    let totalDebits = 0;
+    let totalCredits = 0;
 
-  const rows = statementTxns.map((t) => {
-    const debit = t.direction === 'debit' ? t.amount : 0;
-    const credit = t.direction === 'credit' ? t.amount : 0;
-    totalDebits = Number((totalDebits + debit).toFixed(2));
-    totalCredits = Number((totalCredits + credit).toFixed(2));
-    running = Number((running + credit - debit).toFixed(2));
+    const rows = filtered.map((t) => {
+      const debit = t.direction === 'debit' ? t.amount : 0;
+      const credit = t.direction === 'credit' ? t.amount : 0;
+      totalDebits = Number((totalDebits + debit).toFixed(2));
+      totalCredits = Number((totalCredits + credit).toFixed(2));
+      running = Number((running + credit - debit).toFixed(2));
+
+      return {
+        id: t.id,
+        timestamp: t.timestamp,
+        description: t.description,
+        type: t.type,
+        direction: t.direction,
+        debit,
+        credit,
+        runningBalance: running,
+        referenceId: t.referenceId,
+        hash: t.hash || null
+      };
+    });
 
     return {
-      id: t.id,
-      timestamp: t.timestamp,
-      description: t.description,
-      type: t.type,
-      direction: t.direction,
-      debit,
-      credit,
-      runningBalance: running,
-      referenceId: t.referenceId,
-      counterpartyAccountNumber: t.counterpartyAccountNumber || null,
-      hash: t.hash || null
+      account: {
+        id: account.id,
+        accountNumber: account.account_number,
+        accountType: account.account_type,
+        balance: parseFloat(account.balance),
+        overdraftEnabled: Boolean(account.overdraft_enabled),
+        overdraftLimit: parseFloat(account.overdraft_limit || 0),
+        status: account.status
+      },
+      period: { startDate: startDate || null, endDate: endDate || null },
+      openingBalance,
+      totalDebits,
+      totalCredits,
+      closingBalance: running,
+      transactions: rows
     };
-  });
+  }
 
-  const closingBalance = running;
-
-  return {
-    account: {
-      id: account.id,
-      accountNumber: account.accountNumber,
-      accountType: account.accountType,
-      balance: account.balance,
-      overdraftEnabled: account.overdraftEnabled || false,
-      overdraftLimit: account.overdraftLimit || 0,
-      status: account.status
-    },
-    period: {
-      startDate: startDate || null,
-      endDate: endDate || null
-    },
-    openingBalance,
-    totalDebits,
-    totalCredits,
-    closingBalance,
-    transactions: rows
-  };
+  // In-memory statement
+  return store.getAccountStatement(accountId, filters);
 };
 
 module.exports = {
