@@ -66,13 +66,13 @@ This scripted walkthrough covers every core feature of CoreBanking Sandbox, prov
    cd frontend
    npm run dev
    ```
-3. Open a browser and visit `http://localhost:5173`.
+3. Open a browser and visit `https://corebanking-sandbox.onrender.com` (or locally at `http://localhost:3000`).
 
 ---
 
 ### Step 2: View Dashboard
 
-**Action:** Navigate to `http://localhost:5173/` or click **Dashboard** in the sidebar.
+**Action:** Navigate to `https://corebanking-sandbox.onrender.com/` (or local port) or click **Dashboard** in the sidebar.
 
 **What You See:**
 - **Metric Card 1:** Total Customers = `3` (Rajesh Sharma, Priya Patel, Amit Verma)

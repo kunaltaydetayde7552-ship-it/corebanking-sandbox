@@ -1,6 +1,7 @@
 # API Documentation - CoreBanking Sandbox
 
-> **Base URL:** `http://localhost:5000/api`  
+> **Production Live Base URL:** `https://corebanking-sandbox.onrender.com/api`  
+> **Local Development Base URL:** `http://localhost:5000/api`  
 > **Content-Type:** `application/json`  
 > **Authentication:** None (Sandbox Environment)
 

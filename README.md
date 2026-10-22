@@ -15,6 +15,10 @@
 > **Difficulty:** Core, Level 2  
 > **Industry:** FinTech  
 > **Batch:** 2026 | **Duration:** 4 Weeks  
+> 
+> 🌐 **Live Demo (Render):** [https://corebanking-sandbox.onrender.com](https://corebanking-sandbox.onrender.com)  
+> 📡 **API Base URL:** [https://corebanking-sandbox.onrender.com/api](https://corebanking-sandbox.onrender.com/api)  
+> 📊 **Dashboard Health:** [https://corebanking-sandbox.onrender.com/api/health](https://corebanking-sandbox.onrender.com/api/health)  
 
 ---
 
@@ -86,7 +90,7 @@ CoreBanking Sandbox follows a modular client-server architecture:
 +-------------------------------------------------------------+
 |                     Client (Browser)                        |
 |             React 18 + Vite + Tailwind CSS                  |
-|                   (http://localhost:5173)                   |
+|    (https://corebanking-sandbox.onrender.com or Localhost)  |
 +------------------------------+------------------------------+
                                |
                                | REST API (HTTP JSON)
@@ -94,7 +98,7 @@ CoreBanking Sandbox follows a modular client-server architecture:
 +-------------------------------------------------------------+
 |                      Backend (Node.js)                      |
 |                     Express.js Server                       |
-|                   (http://localhost:5000)                   |
+|           (/api - Production on Render / Localhost)         |
 |                                                             |
 |   +-----------------------------------------------------+   |
 |   |  Routes & Middleware (CORS, JSON Parser, Logger)    |   |
@@ -241,23 +245,30 @@ VITE_API_BASE_URL=http://localhost:5000/api
 
 ## ▶️ Running the Application
 
-### Start Backend Server
+### Option A: Online Live Cloud Deployment (Render)
+The application is deployed and live for production/evaluations:
+- **Web Application URL:** [https://corebanking-sandbox.onrender.com](https://corebanking-sandbox.onrender.com)
+- **API Health Endpoint:** [https://corebanking-sandbox.onrender.com/api/health](https://corebanking-sandbox.onrender.com/api/health)
+
+### Option B: Running Locally
+
+#### Start Backend Server
 From the project root:
 ```bash
 cd backend
 npm run dev
 ```
-> Server runs at: `http://localhost:5000`  
+> Server runs locally at: `http://localhost:5000`  
 > Ready health message: `CoreBanking Sandbox API running on port 5000`
 
-### Start Frontend Application
+#### Start Frontend Application
 In a separate terminal window, from the project root:
 ```bash
 cd frontend
 npm run dev
 ```
-> Client runs at: `http://localhost:5173`  
-> Open `http://localhost:5173` in your browser.
+> Client runs locally at: `http://localhost:3000` or `http://localhost:5173`  
+> Open the browser to test locally.
 
 ---
 
@@ -332,7 +343,7 @@ You can verify the sandbox using either the built-in UI or direct API calls (`cu
 ## 🎬 Demo Walkthrough Flow
 
 Follow this sequence to present the project:
-1. **Launch App:** Start both backend & frontend servers and open `http://localhost:5173`.
+1. **Launch App:** Open the live link `https://corebanking-sandbox.onrender.com` (or start locally at `http://localhost:3000`).
 2. **Dashboard Overview:** Review key KPIs, the balance metric, and the recent transaction feed.
 3. **Register Customer:** Navigate to Customers, click "Add Customer", and submit details for a new user (e.g., Ananya Roy).
 4. **Open Account:** In the Accounts page, select Ananya Roy, choose "Savings", and deposit ₹20,000.

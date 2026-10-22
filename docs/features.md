@@ -44,7 +44,7 @@ Provides banking administrators and tellers with a unified command-center view o
 - `GET /api/dashboard` - Fetches aggregated dashboard metrics and recent activity.
 
 ### 4. How to Test / Demo
-1. Open the web interface at `http://localhost:5173`.
+1. Open the web interface at `https://corebanking-sandbox.onrender.com` (or locally).
 2. Inspect the 4 KPI cards against the seed data:
    - Initial Customers: `3`
    - Initial Accounts: `4`

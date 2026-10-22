@@ -21,7 +21,7 @@ CoreBanking Sandbox models a modern retail core banking engine stripped of legac
 
 ```mermaid
 flowchart TD
-    subgraph Client["Client Browser (localhost:5173)"]
+    subgraph Client["Client Browser (Production on Render / Localhost)"]
         UI["React Single Page Application"]
         Components["Components / Pages / Forms"]
         APIClient["API Service Layer (Axios / Fetch)"]
@@ -29,7 +29,7 @@ flowchart TD
         Components --> APIClient
     end
 
-    subgraph Server["Backend API Server (Node.js + Express: localhost:5000)"]
+    subgraph Server["Backend API Server (Node.js + Express)"]
         Router["Express Router (/api)"]
         subgraph Middlewares["Middleware Pipeline"]
             CORS["CORS Handler"]
