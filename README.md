@@ -24,9 +24,9 @@
 
 ## 📌 Project Overview
 
-**CoreBanking Sandbox** is a simulated core banking environment designed for learning, demonstration, and reference. It provides a full-stack, zero-dependency playground modeling foundational banking primitives: customer registration and lifecycle, savings and current account management, atomic balance updates, double-entry transactional accounting, status control (active/inactive/frozen), and searchable transaction audit trails.
+**CoreBanking Sandbox** is a modern core banking environment designed for learning, demonstration, and enterprise reference. It provides a full-stack, cloud-native architecture modeling foundational banking primitives: customer registration and KYC lifecycle, savings and current account management, atomic balance updates, double-entry transactional accounting, cryptographic SHA-256 audit trails, and strict role-based access control.
 
-The application purposefully eliminates external database setups, third-party payment gateways, and authentication layers, offering clean, transparent, and reproducible code for studying banking workflows.
+The system supports dual-mode operation: **Neon Cloud PostgreSQL** with connection pooling and relational integrity for persistent cloud deployments, with an automatic in-memory fallback for offline sandbox testing. In addition, production-grade **OWASP Security Hardening** protects all endpoints with HTTP security headers, JWT authentication, IDOR access controls, and rate limiting.
 
 ---
 
@@ -72,13 +72,36 @@ Traditional core banking systems (like Finacle, Temenos T24, or FIS Profile) are
 | Layer | Technology | Version | Purpose |
 | :--- | :--- | :--- | :--- |
 | **Frontend Framework** | React | 18.x | Dynamic, reactive single-page user interface |
-| **Build Tool** | Vite | 5.x | Ultra-fast HMR and frontend bundling |
+| **Build Tool** | Vite | 5.x | Ultra-fast HMR and production frontend bundling |
 | **Styling** | Tailwind CSS | 3.x | Modern utility-first responsive banking UI |
 | **Icons & UI** | Lucide React | Latest | Clean financial and navigation iconography |
 | **Backend Runtime** | Node.js | 18+ LTS | Asynchronous server-side JavaScript environment |
 | **Web Framework** | Express.js | 4.x | RESTful API server and route handling |
-| **State & Storage** | In-Memory JSON Store | Native ES6 | Fast, zero-config data store with seed datasets |
-| **HTTP Client** | Axios / Fetch API | Standard | Reliable asynchronous client-server communication |
+| **Cloud Database** | PostgreSQL (Neon) | 16.x | Persistent relational storage with SSL connection pooling |
+| **Security Suite** | Helmet / JWT / RateLimit | Latest | OWASP compliance, CSP, anti-clickjacking, auth, rate limiting |
+| **Testing** | Node Test Runner | Native | Automated regression test suite (19 security/API tests) |
+| **Hosting & Cloud** | Render | Native Web Service | Full-stack deployment serving SPA & backend API |
+
+---
+
+## 🛡️ Security & Enterprise Architecture
+
+1. **HTTP Security Headers (OWASP Compliant):**
+   - Helmet mounted globally with custom Content Security Policy (CSP).
+   - `X-Frame-Options: DENY` preventing clickjacking.
+   - `X-Content-Type-Options: nosniff` preventing MIME confusion.
+   - `Strict-Transport-Security: max-age=31536000; includeSubDomains; preload` (HSTS).
+   - `X-Powered-By` header stripped to prevent server fingerprinting.
+2. **Authentication & IDOR Protection:**
+   - JWT Bearer Token required on all financial routes (`/api/accounts`, `/api/customers`, `/api/transactions`, `/api/dashboard`, `/api/admin`).
+   - Unauthenticated access returns HTTP `401 Unauthorized`.
+   - Insecure Direct Object References (IDOR) strictly blocked: customers can only view and transact on accounts belonging to their verified identity (`403 Forbidden`).
+3. **Rate Limiting & CORS Hardening:**
+   - 100 requests per 15 minutes globally, 30 requests per 15 minutes on sensitive endpoints.
+   - CORS strictly restricted to trusted origin `https://corebanking-sandbox.onrender.com` and authorized local dev ports.
+4. **Relational Database & Cryptographic Audit Ledger:**
+   - Hosted on Neon Cloud Serverless PostgreSQL (`DATABASE_URL`).
+   - Every transaction cryptographically chained with SHA-256 hashes linking each entry to previous transactions for tamper detection.
 
 ---
 
@@ -93,7 +116,7 @@ CoreBanking Sandbox follows a modular client-server architecture:
 |    (https://corebanking-sandbox.onrender.com or Localhost)  |
 +------------------------------+------------------------------+
                                |
-                               | REST API (HTTP JSON)
+                               | HTTPS / REST API (JWT Authenticated)
                                v
 +-------------------------------------------------------------+
 |                      Backend (Node.js)                      |
@@ -101,23 +124,26 @@ CoreBanking Sandbox follows a modular client-server architecture:
 |           (/api - Production on Render / Localhost)         |
 |                                                             |
 |   +-----------------------------------------------------+   |
-|   |  Routes & Middleware (CORS, JSON Parser, Logger)    |   |
+|   |  Security (Helmet, CSP, RateLimit, CORS, JWT Auth)  |   |
 |   +--------------------------+--------------------------+   |
 |                              |                              |
 |   +--------------------------v--------------------------+   |
-|   |  Controllers (Dashboard, Customers, Accounts, Tx)   |   |
+|   |  Controllers & IDOR Guard (Accounts, Customers, Tx) |   |
 |   +--------------------------+--------------------------+   |
 |                              |                              |
 |   +--------------------------v--------------------------+   |
-|   |  Services (Business Rules & Validation Logic)        |   |
+|   |  Services (Business Rules & Transaction Integrity)  |   |
 |   +--------------------------+--------------------------+   |
 +------------------------------+------------------------------+
                                |
-                               | Direct Memory Operations
-                               v
-+-------------------------------------------------------------+
-|              In-Memory Data Store (JSON Memory)             |
-|                                                             |
+                +--------------+--------------+
+                |                             |
+                v                             v
++-------------------------------+ +---------------------------+
+|    Neon Cloud PostgreSQL      | |   In-Memory Fallback      |
+| (Persistent Cloud DB with SSL)| |   (Zero-config offline)   |
++-------------------------------+ +---------------------------+
+```
 |   [ Customers Store ]   [ Accounts Store ]   [ Tx Store ]   |
 |   (Pre-loaded with sample seed data on server startup)      |
 +-------------------------------------------------------------+
