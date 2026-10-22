@@ -48,6 +48,19 @@ const generateTxnId = async () => {
   return `TXN-${String(maxId + 1).padStart(3, '0')}`;
 };
 
+const generateTxnIdWithClient = async (client) => {
+  const res = await client.query("SELECT id FROM transactions WHERE id ~ '^TXN-[0-9]+$'");
+  let maxId = 0;
+  for (const r of res.rows) {
+    const match = r.id.match(/^TXN-(\d+)$/i);
+    if (match) {
+      const num = parseInt(match[1], 10);
+      if (num > maxId) maxId = num;
+    }
+  }
+  return `TXN-${String(maxId + 1).padStart(3, '0')}`;
+};
+
 const getAllTransactions = async (filters = {}) => {
   if (db.isDbConnected()) {
     let queryText = 'SELECT * FROM transactions WHERE 1=1';
@@ -107,45 +120,61 @@ const deposit = async (accountId, amount, description) => {
   const numAmount = Number(Number(amount).toFixed(2));
 
   if (db.isDbConnected()) {
-    const accRes = await db.query('SELECT * FROM accounts WHERE id = $1 OR account_number = $1', [accountId]);
-    if (accRes.rows.length === 0) throw createError(`Account '${accountId}' not found`, 404);
-    const account = accRes.rows[0];
+    const client = await db.getClient();
+    try {
+      await client.query('BEGIN');
 
-    if (account.status !== 'active') {
-      throw createError(`Cannot perform deposit on account with status '${account.status}'`, 400);
-    }
+      // Row-level lock to prevent concurrency race conditions
+      const accRes = await client.query(
+        'SELECT id, account_number, balance, status FROM accounts WHERE id = $1 OR account_number = $1 FOR UPDATE',
+        [accountId]
+      );
+      if (accRes.rows.length === 0) throw createError(`Account '${accountId}' not found`, 404);
+      const account = accRes.rows[0];
 
-    const newBalance = Number((parseFloat(account.balance) + numAmount).toFixed(2));
-    await db.query('UPDATE accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newBalance, account.id]);
-
-    const txnId = await generateTxnId();
-    const lastTxnRes = await db.query('SELECT hash FROM transactions ORDER BY timestamp DESC LIMIT 1');
-    const prevHash = lastTxnRes.rows.length > 0 ? lastTxnRes.rows[0].hash : 'GENESIS';
-    const txnData = {
-      id: txnId,
-      accountId: account.id,
-      amount: numAmount,
-      type: 'deposit',
-      direction: 'credit',
-      timestamp: new Date().toISOString()
-    };
-    const hash = store.calculateHash(prevHash, txnData);
-
-    const insTxn = await db.query(`
-      INSERT INTO transactions (id, account_id, account_number, type, direction, amount, balance, description, reference_id, prev_hash, hash)
-      VALUES ($1, $2, $3, 'deposit', 'credit', $4, $5, $6, NULL, $7, $8)
-      RETURNING *
-    `, [txnId, account.id, account.account_number, numAmount, newBalance, description ? String(description).trim() : 'Account deposit', prevHash, hash]);
-
-    return {
-      transaction: mapTxnRow(insTxn.rows[0]),
-      account: {
-        id: account.id,
-        accountNumber: account.account_number,
-        balance: newBalance,
-        status: account.status
+      if (account.status !== 'active') {
+        throw createError(`Cannot perform deposit on account with status '${account.status}'`, 400);
       }
-    };
+
+      const newBalance = Number((parseFloat(account.balance) + numAmount).toFixed(2));
+      await client.query('UPDATE accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newBalance, account.id]);
+
+      const txnId = await generateTxnIdWithClient(client);
+      const lastTxnRes = await client.query('SELECT hash FROM transactions ORDER BY timestamp DESC LIMIT 1 FOR UPDATE');
+      const prevHash = lastTxnRes.rows.length > 0 ? lastTxnRes.rows[0].hash : 'GENESIS';
+      const txnData = {
+        id: txnId,
+        accountId: account.id,
+        amount: numAmount,
+        type: 'deposit',
+        direction: 'credit',
+        timestamp: new Date().toISOString()
+      };
+      const hash = store.calculateHash(prevHash, txnData);
+
+      const insTxn = await client.query(`
+        INSERT INTO transactions (id, account_id, account_number, type, direction, amount, balance, description, reference_id, prev_hash, hash)
+        VALUES ($1, $2, $3, 'deposit', 'credit', $4, $5, $6, NULL, $7, $8)
+        RETURNING *
+      `, [txnId, account.id, account.account_number, numAmount, newBalance, description ? String(description).trim() : 'Account deposit', prevHash, hash]);
+
+      await client.query('COMMIT');
+
+      return {
+        transaction: mapTxnRow(insTxn.rows[0]),
+        account: {
+          id: account.id,
+          accountNumber: account.account_number,
+          balance: newBalance,
+          status: account.status
+        }
+      };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   // In-memory fallback
@@ -179,57 +208,73 @@ const withdraw = async (accountId, amount, description) => {
   const numAmount = Number(Number(amount).toFixed(2));
 
   if (db.isDbConnected()) {
-    const accRes = await db.query('SELECT * FROM accounts WHERE id = $1 OR account_number = $1', [accountId]);
-    if (accRes.rows.length === 0) throw createError(`Account '${accountId}' not found`, 404);
-    const account = accRes.rows[0];
+    const client = await db.getClient();
+    try {
+      await client.query('BEGIN');
 
-    if (account.status !== 'active') {
-      throw createError(`Cannot perform withdrawal on account with status '${account.status}'`, 400);
-    }
+      // Row-level lock: SELECT balance, status, overdraft_enabled, overdraft_limit FROM accounts WHERE id = $1 FOR UPDATE
+      const accRes = await client.query(
+        'SELECT id, account_number, balance, status, overdraft_enabled, overdraft_limit FROM accounts WHERE id = $1 OR account_number = $1 FOR UPDATE',
+        [accountId]
+      );
+      if (accRes.rows.length === 0) throw createError(`Account '${accountId}' not found`, 404);
+      const account = accRes.rows[0];
 
-    const currentBal = parseFloat(account.balance);
-    const odLimit = account.overdraft_enabled ? parseFloat(account.overdraft_limit || 0) : 0;
-    const maxAvailable = Number((currentBal + odLimit).toFixed(2));
-
-    if (numAmount > maxAvailable) {
-      if (account.overdraft_enabled) {
-        throw createError(`Withdrawal blocked. ${account.account_number} has ₹${currentBal.toFixed(2)} balance and ₹${odLimit.toFixed(2)} overdraft (Total available: ₹${maxAvailable.toFixed(2)}).`, 400);
-      } else {
-        throw createError(`Withdrawal blocked. ${account.account_number} has ₹${currentBal.toFixed(2)} available and no overdraft.`, 400);
+      if (account.status !== 'active') {
+        throw createError(`Cannot perform withdrawal on account with status '${account.status}'`, 400);
       }
-    }
 
-    const newBalance = Number((currentBal - numAmount).toFixed(2));
-    await db.query('UPDATE accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newBalance, account.id]);
+      const currentBal = parseFloat(account.balance);
+      const odLimit = account.overdraft_enabled ? parseFloat(account.overdraft_limit || 0) : 0;
+      const maxAvailable = Number((currentBal + odLimit).toFixed(2));
 
-    const txnId = await generateTxnId();
-    const lastTxnRes = await db.query('SELECT hash FROM transactions ORDER BY timestamp DESC LIMIT 1');
-    const prevHash = lastTxnRes.rows.length > 0 ? lastTxnRes.rows[0].hash : 'GENESIS';
-    const txnData = {
-      id: txnId,
-      accountId: account.id,
-      amount: numAmount,
-      type: 'withdrawal',
-      direction: 'debit',
-      timestamp: new Date().toISOString()
-    };
-    const hash = store.calculateHash(prevHash, txnData);
-
-    const insTxn = await db.query(`
-      INSERT INTO transactions (id, account_id, account_number, type, direction, amount, balance, description, reference_id, prev_hash, hash)
-      VALUES ($1, $2, $3, 'withdrawal', 'debit', $4, $5, $6, NULL, $7, $8)
-      RETURNING *
-    `, [txnId, account.id, account.account_number, numAmount, newBalance, description ? String(description).trim() : 'Account withdrawal', prevHash, hash]);
-
-    return {
-      transaction: mapTxnRow(insTxn.rows[0]),
-      account: {
-        id: account.id,
-        accountNumber: account.account_number,
-        balance: newBalance,
-        status: account.status
+      if (numAmount > maxAvailable) {
+        if (account.overdraft_enabled) {
+          throw createError(`Withdrawal blocked. ${account.account_number} has ₹${currentBal.toFixed(2)} balance and ₹${odLimit.toFixed(2)} overdraft (Total available: ₹${maxAvailable.toFixed(2)}).`, 400);
+        } else {
+          throw createError(`Withdrawal blocked. ${account.account_number} has ₹${currentBal.toFixed(2)} available and no overdraft.`, 400);
+        }
       }
-    };
+
+      const newBalance = Number((currentBal - numAmount).toFixed(2));
+      await client.query('UPDATE accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newBalance, account.id]);
+
+      const txnId = await generateTxnIdWithClient(client);
+      const lastTxnRes = await client.query('SELECT hash FROM transactions ORDER BY timestamp DESC LIMIT 1 FOR UPDATE');
+      const prevHash = lastTxnRes.rows.length > 0 ? lastTxnRes.rows[0].hash : 'GENESIS';
+      const txnData = {
+        id: txnId,
+        accountId: account.id,
+        amount: numAmount,
+        type: 'withdrawal',
+        direction: 'debit',
+        timestamp: new Date().toISOString()
+      };
+      const hash = store.calculateHash(prevHash, txnData);
+
+      const insTxn = await client.query(`
+        INSERT INTO transactions (id, account_id, account_number, type, direction, amount, balance, description, reference_id, prev_hash, hash)
+        VALUES ($1, $2, $3, 'withdrawal', 'debit', $4, $5, $6, NULL, $7, $8)
+        RETURNING *
+      `, [txnId, account.id, account.account_number, numAmount, newBalance, description ? String(description).trim() : 'Account withdrawal', prevHash, hash]);
+
+      await client.query('COMMIT');
+
+      return {
+        transaction: mapTxnRow(insTxn.rows[0]),
+        account: {
+          id: account.id,
+          accountNumber: account.account_number,
+          balance: newBalance,
+          status: account.status
+        }
+      };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   // In-memory fallback
@@ -267,81 +312,101 @@ const transfer = async (fromAccountId, toAccountId, amount, description) => {
   const numAmount = Number(Number(amount).toFixed(2));
 
   if (db.isDbConnected()) {
-    const fromRes = await db.query('SELECT * FROM accounts WHERE id = $1 OR account_number = $1', [fromAccountId]);
-    if (fromRes.rows.length === 0) throw createError(`Source account '${fromAccountId}' not found`, 404);
-    const fromAcc = fromRes.rows[0];
+    const client = await db.getClient();
+    try {
+      await client.query('BEGIN');
 
-    const toRes = await db.query('SELECT * FROM accounts WHERE id = $1 OR account_number = $1', [toAccountId]);
-    if (toRes.rows.length === 0) throw createError(`Destination account '${toAccountId}' not found`, 404);
-    const toAcc = toRes.rows[0];
+      // 1. Lock the sender row with SELECT ... FOR UPDATE to prevent race conditions & double-spending
+      const fromRes = await client.query(
+        'SELECT id, account_number, balance, status, overdraft_enabled, overdraft_limit FROM accounts WHERE id = $1 OR account_number = $1 FOR UPDATE',
+        [fromAccountId]
+      );
+      if (fromRes.rows.length === 0) throw createError(`Source account '${fromAccountId}' not found`, 404);
+      const fromAcc = fromRes.rows[0];
 
-    if (fromAcc.id === toAcc.id) throw createError('Choose two different accounts to transfer between.', 400);
-    if (fromAcc.status !== 'active') throw createError(`Source account '${fromAcc.account_number}' is not active`, 400);
-    if (toAcc.status !== 'active') throw createError(`Destination account '${toAcc.account_number}' is not active`, 400);
+      // 2. Lock destination row with SELECT ... FOR UPDATE
+      const toRes = await client.query(
+        'SELECT id, account_number, balance, status, overdraft_enabled, overdraft_limit FROM accounts WHERE id = $1 OR account_number = $1 FOR UPDATE',
+        [toAccountId]
+      );
+      if (toRes.rows.length === 0) throw createError(`Destination account '${toAccountId}' not found`, 404);
+      const toAcc = toRes.rows[0];
 
-    const fromBal = parseFloat(fromAcc.balance);
-    const odLimit = fromAcc.overdraft_enabled ? parseFloat(fromAcc.overdraft_limit || 0) : 0;
-    const maxAvailable = Number((fromBal + odLimit).toFixed(2));
+      if (fromAcc.id === toAcc.id) throw createError('Choose two different accounts to transfer between.', 400);
+      if (fromAcc.status !== 'active') throw createError(`Source account '${fromAcc.account_number}' is not active`, 400);
+      if (toAcc.status !== 'active') throw createError(`Destination account '${toAcc.account_number}' is not active`, 400);
 
-    if (numAmount > maxAvailable) {
-      if (fromAcc.overdraft_enabled) {
-        throw createError(`Transfer blocked. ${fromAcc.account_number} has ₹${fromBal.toFixed(2)} balance with ₹${odLimit.toFixed(2)} overdraft (Total available: ₹${maxAvailable.toFixed(2)}).`, 400);
-      } else {
-        throw createError(`Transfer blocked. ${fromAcc.account_number} has ₹${fromBal.toFixed(2)} available and no overdraft.`, 400);
+      const fromBal = parseFloat(fromAcc.balance);
+      const odLimit = fromAcc.overdraft_enabled ? parseFloat(fromAcc.overdraft_limit || 0) : 0;
+      const maxAvailable = Number((fromBal + odLimit).toFixed(2));
+
+      if (numAmount > maxAvailable) {
+        if (fromAcc.overdraft_enabled) {
+          throw createError(`Transfer blocked. ${fromAcc.account_number} has ₹${fromBal.toFixed(2)} balance with ₹${odLimit.toFixed(2)} overdraft (Total available: ₹${maxAvailable.toFixed(2)}).`, 400);
+        } else {
+          throw createError(`Transfer blocked. ${fromAcc.account_number} has ₹${fromBal.toFixed(2)} available and no overdraft.`, 400);
+        }
       }
+
+      const newFromBal = Number((fromBal - numAmount).toFixed(2));
+      const newToBal = Number((parseFloat(toAcc.balance) + numAmount).toFixed(2));
+
+      await client.query('UPDATE accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newFromBal, fromAcc.id]);
+      await client.query('UPDATE accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newToBal, toAcc.id]);
+
+      const dId = await generateTxnIdWithClient(client);
+      const cNum = parseInt(dId.replace('TXN-', ''), 10) + 1;
+      const cId = `TXN-${String(cNum).padStart(3, '0')}`;
+
+      const lastTxnRes = await client.query('SELECT hash FROM transactions ORDER BY timestamp DESC LIMIT 1 FOR UPDATE');
+      const prevHash1 = lastTxnRes.rows.length > 0 ? lastTxnRes.rows[0].hash : 'GENESIS';
+
+      const dData = {
+        id: dId,
+        accountId: fromAcc.id,
+        amount: numAmount,
+        type: 'transfer',
+        direction: 'debit',
+        timestamp: new Date().toISOString()
+      };
+      const dHash = store.calculateHash(prevHash1, dData);
+
+      const cData = {
+        id: cId,
+        accountId: toAcc.id,
+        amount: numAmount,
+        type: 'transfer',
+        direction: 'credit',
+        timestamp: dData.timestamp
+      };
+      const cHash = store.calculateHash(dHash, cData);
+
+      const dIns = await client.query(`
+        INSERT INTO transactions (id, account_id, account_number, type, direction, amount, balance, description, reference_id, prev_hash, hash)
+        VALUES ($1, $2, $3, 'transfer', 'debit', $4, $5, $6, $7, $8, $9)
+        RETURNING *
+      `, [dId, fromAcc.id, fromAcc.account_number, numAmount, newFromBal, description || `Transfer to ${toAcc.account_number}`, toAcc.id, prevHash1, dHash]);
+
+      const cIns = await client.query(`
+        INSERT INTO transactions (id, account_id, account_number, type, direction, amount, balance, description, reference_id, prev_hash, hash)
+        VALUES ($1, $2, $3, 'transfer', 'credit', $4, $5, $6, $7, $8, $9)
+        RETURNING *
+      `, [cId, toAcc.id, toAcc.account_number, numAmount, newToBal, description || `Transfer from ${fromAcc.account_number}`, fromAcc.id, dHash, cHash]);
+
+      await client.query('COMMIT');
+
+      return {
+        transferDebit: mapTxnRow(dIns.rows[0]),
+        transferCredit: mapTxnRow(cIns.rows[0]),
+        fromAccount: { id: fromAcc.id, accountNumber: fromAcc.account_number, balance: newFromBal, status: fromAcc.status },
+        toAccount: { id: toAcc.id, accountNumber: toAcc.account_number, balance: newToBal, status: toAcc.status }
+      };
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
     }
-
-    const newFromBal = Number((fromBal - numAmount).toFixed(2));
-    const newToBal = Number((parseFloat(toAcc.balance) + numAmount).toFixed(2));
-
-    await db.query('UPDATE accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newFromBal, fromAcc.id]);
-    await db.query('UPDATE accounts SET balance = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2', [newToBal, toAcc.id]);
-
-    const dId = await generateTxnId();
-    const cNum = parseInt(dId.replace('TXN-', ''), 10) + 1;
-    const cId = `TXN-${String(cNum).padStart(3, '0')}`;
-
-    const lastTxnRes = await db.query('SELECT hash FROM transactions ORDER BY timestamp DESC LIMIT 1');
-    const prevHash1 = lastTxnRes.rows.length > 0 ? lastTxnRes.rows[0].hash : 'GENESIS';
-
-    const dData = {
-      id: dId,
-      accountId: fromAcc.id,
-      amount: numAmount,
-      type: 'transfer',
-      direction: 'debit',
-      timestamp: new Date().toISOString()
-    };
-    const dHash = store.calculateHash(prevHash1, dData);
-
-    const cData = {
-      id: cId,
-      accountId: toAcc.id,
-      amount: numAmount,
-      type: 'transfer',
-      direction: 'credit',
-      timestamp: dData.timestamp
-    };
-    const cHash = store.calculateHash(dHash, cData);
-
-    const dIns = await db.query(`
-      INSERT INTO transactions (id, account_id, account_number, type, direction, amount, balance, description, reference_id, prev_hash, hash)
-      VALUES ($1, $2, $3, 'transfer', 'debit', $4, $5, $6, $7, $8, $9)
-      RETURNING *
-    `, [dId, fromAcc.id, fromAcc.account_number, numAmount, newFromBal, description || `Transfer to ${toAcc.account_number}`, toAcc.id, prevHash1, dHash]);
-
-    const cIns = await db.query(`
-      INSERT INTO transactions (id, account_id, account_number, type, direction, amount, balance, description, reference_id, prev_hash, hash)
-      VALUES ($1, $2, $3, 'transfer', 'credit', $4, $5, $6, $7, $8, $9)
-      RETURNING *
-    `, [cId, toAcc.id, toAcc.account_number, numAmount, newToBal, description || `Transfer from ${fromAcc.account_number}`, fromAcc.id, dHash, cHash]);
-
-    return {
-      transferDebit: mapTxnRow(dIns.rows[0]),
-      transferCredit: mapTxnRow(cIns.rows[0]),
-      fromAccount: { id: fromAcc.id, accountNumber: fromAcc.account_number, balance: newFromBal, status: fromAcc.status },
-      toAccount: { id: toAcc.id, accountNumber: toAcc.account_number, balance: newToBal, status: toAcc.status }
-    };
   }
 
   // In-memory fallback

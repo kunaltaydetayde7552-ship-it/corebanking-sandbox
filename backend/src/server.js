@@ -12,6 +12,7 @@ try {
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const hpp = require('hpp');
 const { PORT, NODE_ENV, DEFAULT_ALLOWED_ORIGINS } = require('./config');
 const requestLogger = require('./middleware/requestLogger');
 const errorHandler = require('./middleware/errorHandler');
@@ -90,9 +91,12 @@ app.use(
   })
 );
 
-// Body Parsers
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// 3. Body Parsers with Strict Size Limits (DoS / Memory Exhaustion Protection)
+app.use(express.json({ limit: '10kb' }));
+app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+
+// 4. HTTP Parameter Pollution (HPP) Protection
+app.use(hpp());
 
 // Request Logging
 app.use(requestLogger);

@@ -15,7 +15,10 @@ api.interceptors.request.use(
 
     if (!token) {
       try {
-        const res = await axios.post('/api/auth/token', { role });
+        const res = await axios.post('/api/auth/token', {
+          role,
+          password: role === 'ADMIN' ? 'admin123' : 'dev123'
+        });
         if (res.data && res.data.token) {
           token = res.data.token;
           localStorage.setItem('corebank_auth_token', token);
@@ -42,7 +45,10 @@ api.interceptors.response.use(
       originalRequest._retry = true;
       try {
         const role = localStorage.getItem('corebank_role') || 'DEVELOPER';
-        const res = await axios.post('/api/auth/token', { role });
+        const res = await axios.post('/api/auth/token', {
+          role,
+          password: role === 'ADMIN' ? 'admin123' : 'dev123'
+        });
         if (res.data && res.data.token) {
           const newToken = res.data.token;
           localStorage.setItem('corebank_auth_token', newToken);

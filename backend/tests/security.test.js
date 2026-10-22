@@ -170,6 +170,90 @@ async function runTests() {
       'IDOR Protection: Customer CUST-001 blocked from accessing CUST-002 profile -> 403 Forbidden'
     );
 
+    console.log('\n--- AREA 2: Admin Authentication Fallback Bypass Closure ---');
+    // 1. Attempt to bypass login with just role: ADMIN
+    const bypassLoginRes = await request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { role: 'ADMIN' }
+    });
+    assert(
+      bypassLoginRes.statusCode === 401,
+      'POST /api/auth/login with { role: "ADMIN" } and no credentials rejected (401 Unauthorized)'
+    );
+
+    // 2. Attempt to bypass /token with just role: ADMIN and no password
+    const bypassTokenRes = await request('/api/auth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { role: 'ADMIN' }
+    });
+    assert(
+      bypassTokenRes.statusCode === 401 &&
+        bypassTokenRes.body.message &&
+        bypassTokenRes.body.message.includes('Admin credentials required'),
+      'POST /api/auth/token with { role: "ADMIN" } without password rejected (401 Unauthorized)'
+    );
+
+    // 3. Attempt with wrong password
+    const wrongAdminRes = await request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { email: 'admin@corebanking.com', password: 'wrongpassword' }
+    });
+    assert(
+      wrongAdminRes.statusCode === 401,
+      'POST /api/auth/login with invalid admin password rejected (401 Unauthorized)'
+    );
+
+    // 4. Legitimate verified admin login
+    const legitAdminRes = await request('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { email: 'admin@corebanking.com', password: 'admin123' }
+    });
+    assert(
+      legitAdminRes.statusCode === 200 &&
+        legitAdminRes.body.user &&
+        legitAdminRes.body.user.role === 'ADMIN',
+      'POST /api/auth/login with valid credentials successfully returns verified ADMIN token'
+    );
+
+    // 5. Verified admin session token
+    const legitAdminTokenRes = await request('/api/auth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: { role: 'ADMIN', password: 'admin123' }
+    });
+    assert(
+      legitAdminTokenRes.statusCode === 200 &&
+        legitAdminTokenRes.body.user &&
+        legitAdminTokenRes.body.user.role === 'ADMIN',
+      'POST /api/auth/token with verified password returns ADMIN session token'
+    );
+
+    console.log('\n--- AREA 3: HTTP Parameter Pollution (HPP) & Body Parser Limits ---');
+    // HPP test: polluted array parameters should be sanitized without crash
+    const hppRes = await request('/api/transactions?type=deposit&type=withdrawal', {
+      headers: { Authorization: `Bearer ${devToken}` }
+    });
+    assert(
+      hppRes.statusCode === 200 && hppRes.body.success === true,
+      'HPP: Polluted query parameters handled safely without 500 crashes'
+    );
+
+    // Body limit test: payload larger than 10kb should be rejected with 413 Payload Too Large
+    const largePayload = { dummy: 'X'.repeat(12 * 1024) }; // ~12kb
+    const largeRes = await request('/api/auth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: largePayload
+    });
+    assert(
+      largeRes.statusCode === 413,
+      'DoS Protection: Payload exceeding 10kb rejected with HTTP 413 Payload Too Large'
+    );
+
     console.log('\n--- AREA 4: CORS Hardening ---');
     const corsGood = await request('/api/health', {
       headers: { Origin: 'https://corebanking-sandbox.onrender.com' }

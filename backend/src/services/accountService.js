@@ -118,7 +118,8 @@ const getAccountById = async (id) => {
 };
 
 const createAccount = async (data) => {
-  const { customerId, accountType, initialBalance = 0 } = data || {};
+  const { customerId, accountType } = data || {};
+  const initialBalance = data.initialDeposit !== undefined ? data.initialDeposit : (data.initialBalance || 0);
 
   if (!customerId) {
     throw createError('customerId is required');

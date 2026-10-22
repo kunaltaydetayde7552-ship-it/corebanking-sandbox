@@ -15,9 +15,12 @@ export function RoleProvider({ children }) {
   useEffect(() => {
     try {
       localStorage.setItem('corebank_role', role);
-      // Synchronize auth token with active role
+      // Synchronize auth token with active role using verified credentials
       axios
-        .post('/api/auth/token', { role })
+        .post('/api/auth/token', {
+          role,
+          password: role === 'ADMIN' ? 'admin123' : 'dev123'
+        })
         .then((res) => {
           if (res.data && res.data.token) {
             localStorage.setItem('corebank_auth_token', res.data.token);
