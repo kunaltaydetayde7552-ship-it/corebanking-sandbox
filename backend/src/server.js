@@ -54,7 +54,25 @@ app.get('/', (req, res) => {
 // API Routes
 app.use('/api', routes);
 
-// 404 Handler for undefined routes
+// Serve Frontend Static Files in Production
+const path = require('path');
+const frontendDist = path.join(__dirname, '../../frontend/dist');
+app.use(express.static(frontendDist));
+
+// SPA fallback for frontend routes (except /api)
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) {
+    return next();
+  }
+  const indexPath = path.join(frontendDist, 'index.html');
+  res.sendFile(indexPath, (err) => {
+    if (err) {
+      next();
+    }
+  });
+});
+
+// 404 Handler for undefined API routes
 app.use((req, res) => {
   res.status(404).json({
     success: false,
