@@ -41,16 +41,6 @@ app.use(express.urlencoded({ extended: true }));
 // Request Logging
 app.use(requestLogger);
 
-// Root route
-app.get('/', (req, res) => {
-  res.json({
-    success: true,
-    message: 'Welcome to CoreBanking Sandbox API',
-    documentation: '/api',
-    status: 'online'
-  });
-});
-
 // API Routes
 app.use('/api', routes);
 
