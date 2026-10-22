@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import axios from 'axios';
 
 const RoleContext = createContext();
 
@@ -14,6 +15,15 @@ export function RoleProvider({ children }) {
   useEffect(() => {
     try {
       localStorage.setItem('corebank_role', role);
+      // Synchronize auth token with active role
+      axios
+        .post('/api/auth/token', { role })
+        .then((res) => {
+          if (res.data && res.data.token) {
+            localStorage.setItem('corebank_auth_token', res.data.token);
+          }
+        })
+        .catch(() => {});
     } catch {
       // storage error fallback
     }

@@ -7,7 +7,11 @@ const { successResponse } = require('../utils/response');
 
 const getAll = async (req, res, next) => {
   try {
-    const customers = await customerService.getAllCustomers();
+    let customers = await customerService.getAllCustomers();
+    if (req.user && req.user.role === 'CUSTOMER') {
+      const userCustomerId = req.user.customerId || req.user.id;
+      customers = customers.filter((c) => c.id === userCustomerId);
+    }
     return successResponse(res, customers, 'Customers retrieved successfully');
   } catch (error) {
     next(error);

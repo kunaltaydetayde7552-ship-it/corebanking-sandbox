@@ -7,6 +7,61 @@ const api = axios.create({
   },
 });
 
+// Request interceptor: attach JWT Bearer token
+api.interceptors.request.use(
+  async (config) => {
+    let token = localStorage.getItem('corebank_auth_token');
+    const role = localStorage.getItem('corebank_role') || 'DEVELOPER';
+
+    if (!token) {
+      try {
+        const res = await axios.post('/api/auth/token', { role });
+        if (res.data && res.data.token) {
+          token = res.data.token;
+          localStorage.setItem('corebank_auth_token', token);
+        }
+      } catch (e) {
+        // continue without token if network error
+      }
+    }
+
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
+
+// Response interceptor: automatically renew token on 401
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const originalRequest = error.config;
+    if (error.response && error.response.status === 401 && !originalRequest._retry) {
+      originalRequest._retry = true;
+      try {
+        const role = localStorage.getItem('corebank_role') || 'DEVELOPER';
+        const res = await axios.post('/api/auth/token', { role });
+        if (res.data && res.data.token) {
+          const newToken = res.data.token;
+          localStorage.setItem('corebank_auth_token', newToken);
+          originalRequest.headers.Authorization = `Bearer ${newToken}`;
+          return api(originalRequest);
+        }
+      } catch (e) {
+        // refresh failed
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+// Auth
+export const login = (credentials) => api.post('/auth/login', credentials);
+export const getAuthToken = (role) => api.post('/auth/token', { role });
+export const getAuthMe = () => api.get('/auth/me');
+
 // Dashboard
 export const getDashboardMetrics = () => api.get('/dashboard');
 

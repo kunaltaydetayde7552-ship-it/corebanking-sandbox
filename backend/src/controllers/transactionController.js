@@ -1,4 +1,5 @@
 const transactionService = require('../services/transactionService');
+const accountService = require('../services/accountService');
 const { successResponse, paginatedResponse } = require('../utils/response');
 
 /**
@@ -7,7 +8,18 @@ const { successResponse, paginatedResponse } = require('../utils/response');
 
 const getAll = async (req, res, next) => {
   try {
-    const result = await transactionService.getAllTransactions(req.query);
+    let result = await transactionService.getAllTransactions(req.query);
+    if (req.user && req.user.role === 'CUSTOMER') {
+      const userCustomerId = req.user.customerId || req.user.id;
+      const userAccounts = await accountService.getAccountsByCustomerId(userCustomerId);
+      const userAccountIds = new Set(userAccounts.map((a) => a.id));
+      const filtered = result.transactions.filter((t) => userAccountIds.has(t.accountId));
+      result = {
+        ...result,
+        transactions: filtered,
+        total: filtered.length
+      };
+    }
     return paginatedResponse(
       res,
       result.transactions,

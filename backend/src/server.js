@@ -11,7 +11,8 @@ try {
 
 const express = require('express');
 const cors = require('cors');
-const { PORT, NODE_ENV } = require('./config');
+const helmet = require('helmet');
+const { PORT, NODE_ENV, DEFAULT_ALLOWED_ORIGINS } = require('./config');
 const requestLogger = require('./middleware/requestLogger');
 const errorHandler = require('./middleware/errorHandler');
 const routes = require('./routes');
@@ -19,19 +20,73 @@ const { initDatabase } = require('./models/schema');
 
 const app = express();
 
-// Enable CORS - explicitly allow localhost:5173 and development tools
+// Trust reverse proxy (e.g. Render, Cloudflare) for rate limiting & secure cookies/headers
+app.set('trust proxy', 1);
+
+// 1. HTTP Security Headers & Anti-Fingerprinting (OWASP Compliant)
+app.disable('x-powered-by');
+
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+        fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+        imgSrc: ["'self'", 'data:', 'https:'],
+        connectSrc: [
+          "'self'",
+          'https://corebanking-sandbox.onrender.com',
+          'http://localhost:5000',
+          'http://localhost:5173',
+          'http://127.0.0.1:5173',
+          'http://127.0.0.1:5000'
+        ],
+        frameAncestors: ["'none'"],
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: []
+      }
+    },
+    frameguard: {
+      action: 'deny'
+    },
+    noSniff: true,
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true
+    },
+    referrerPolicy: {
+      policy: 'strict-origin-when-cross-origin'
+    }
+  })
+);
+
+// 2. Harden CORS Configuration - Strictly restricted to trusted frontend origins
+const allowedOrigins = [...DEFAULT_ALLOWED_ORIGINS];
+if (process.env.FRONTEND_URL) {
+  const custom = process.env.FRONTEND_URL.replace(/\/$/, '');
+  if (!allowedOrigins.includes(custom)) {
+    allowedOrigins.push(custom);
+  }
+}
+
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like Postman or curl) or local dev servers
-      if (!origin || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+      // Allow requests with no origin (curl, mobile, server-to-server)
+      if (!origin) {
         return callback(null, true);
       }
-      return callback(null, true);
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Origin '${origin}' not allowed by CORS`));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Auth-Token', 'x-role']
   })
 );
 
