@@ -277,6 +277,124 @@ async function runTests() {
       'Rate limiting headers (RateLimit-Limit) present on responses'
     );
 
+    console.log('\n--- PRD PST_PD_153 COMPLIANCE & SECURITY HARDENING ---');
+    // 1. Admin Overdraft & Status Protection (US-05, US-09, Section 17)
+    const devOverdraftRes = await request('/api/accounts/ACC-001/overdraft', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${devToken}`
+      },
+      body: { overdraftEnabled: true, overdraftLimit: 25000 }
+    });
+    assert(
+      devOverdraftRes.statusCode === 403 &&
+        devOverdraftRes.body.message === 'Unauthorized: Only Admin can modify overdraft settings and account limits.',
+      'Developer role blocked from PATCH /api/accounts/:id/overdraft (403 Forbidden with exact message)'
+    );
+
+    const devStatusRes = await request('/api/accounts/ACC-001/status', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${devToken}`
+      },
+      body: { status: 'frozen' }
+    });
+    assert(
+      devStatusRes.statusCode === 403 &&
+        devStatusRes.body.message === 'Unauthorized: Only Admin can modify overdraft settings and account limits.',
+      'Developer role blocked from PATCH /api/accounts/:id/status (403 Forbidden with exact message)'
+    );
+
+    // Admin allowed to update overdraft
+    const adminToken = legitAdminTokenRes.body.token;
+    const adminOverdraftRes = await request('/api/accounts/ACC-001/overdraft', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: { overdraftEnabled: false, overdraftLimit: 0 }
+    });
+    assert(
+      adminOverdraftRes.statusCode === 200 && adminOverdraftRes.body.success === true,
+      'Admin role permitted to PATCH /api/accounts/:id/overdraft (200 OK)'
+    );
+
+    // 2. Real Database & Store Reset (US-08)
+    const resetRes = await request('/api/admin/reset', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${adminToken}` }
+    });
+    assert(
+      resetRes.statusCode === 200 &&
+        resetRes.body.success === true &&
+        resetRes.body.data.totalAccounts === 5,
+      'POST /api/admin/reset re-seeds exact 5 sample accounts and transactions (200 OK)'
+    );
+
+    // 3. Fractional Underflow & Minimum Amount Validation (Money Rule: amount >= 0.01)
+    const underflowDeposit = await request('/api/transactions/deposit', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: { accountId: 'ACC-001', amount: 0.001, description: 'Underflow test' }
+    });
+    assert(
+      underflowDeposit.statusCode === 400 &&
+        underflowDeposit.body.message === 'Enter an amount greater than ₹0.00.',
+      'Deposit with fractional underflow (0.001) rejected with "Enter an amount greater than ₹0.00."'
+    );
+
+    const underflowWithdraw = await request('/api/transactions/withdraw', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: { accountId: 'ACC-001', amount: 0.0001, description: 'Underflow test' }
+    });
+    assert(
+      underflowWithdraw.statusCode === 400 &&
+        underflowWithdraw.body.message === 'Enter an amount greater than ₹0.00.',
+      'Withdrawal with fractional underflow (0.0001) rejected with "Enter an amount greater than ₹0.00."'
+    );
+
+    const underflowTransfer = await request('/api/transactions/transfer', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: { fromAccountId: 'ACC-001', toAccountId: 'ACC-002', amount: 0.004, description: 'Underflow test' }
+    });
+    assert(
+      underflowTransfer.statusCode === 400 &&
+        underflowTransfer.body.message === 'Enter an amount greater than ₹0.00.',
+      'Transfer with fractional underflow (0.004) rejected with "Enter an amount greater than ₹0.00."'
+    );
+
+    // 4. Linked Debit & Credit Entries with matching transferId (US-03 & Section 10)
+    const validTransfer = await request('/api/transactions/transfer', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${adminToken}`
+      },
+      body: { fromAccountId: 'ACC-001', toAccountId: 'ACC-002', amount: 500, description: 'Audit link test' }
+    });
+    assert(
+      validTransfer.statusCode === 201 &&
+        validTransfer.body.success === true &&
+        validTransfer.body.data.transferId &&
+        validTransfer.body.data.transferDebit.transferId === validTransfer.body.data.transferId &&
+        validTransfer.body.data.transferCredit.transferId === validTransfer.body.data.transferId,
+      'Transfer generates linked transferId matching across both debit and credit entries'
+    );
+
     console.log('\n=============================================');
     console.log(`TOTAL TESTS: ${passed + failed} | PASSED: ${passed} | FAILED: ${failed}`);
     console.log('=============================================\n');

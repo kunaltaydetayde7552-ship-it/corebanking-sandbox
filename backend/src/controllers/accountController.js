@@ -48,10 +48,11 @@ const create = async (req, res, next) => {
 
 const updateStatus = async (req, res, next) => {
   try {
-    if (req.user && req.user.role === 'CUSTOMER') {
+    const userRole = (req.user?.role || '').toUpperCase();
+    if (userRole !== 'ADMIN') {
       return res.status(403).json({
         success: false,
-        message: 'Access denied: Customer cannot modify account status'
+        message: 'Unauthorized: Only Admin can modify overdraft settings and account limits.'
       });
     }
     const { status } = req.body;
@@ -64,10 +65,11 @@ const updateStatus = async (req, res, next) => {
 
 const updateOverdraft = async (req, res, next) => {
   try {
-    if (req.user && req.user.role === 'CUSTOMER') {
+    const userRole = (req.user?.role || '').toUpperCase();
+    if (userRole !== 'ADMIN') {
       return res.status(403).json({
         success: false,
-        message: 'Access denied: Customer cannot modify overdraft settings'
+        message: 'Unauthorized: Only Admin can modify overdraft settings and account limits.'
       });
     }
     const updatedAccount = await accountService.updateOverdraft(req.params.id, req.body);

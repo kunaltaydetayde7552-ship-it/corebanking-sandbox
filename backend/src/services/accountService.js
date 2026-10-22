@@ -54,7 +54,7 @@ const generateAccountId = async () => {
 };
 
 const generateAccountNumber = async () => {
-  let maxAccNum = 1001000004;
+  let maxAccNum = 1001000005;
   if (db.isDbConnected()) {
     const res = await db.query('SELECT account_number FROM accounts');
     for (const r of res.rows) {

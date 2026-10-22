@@ -15,11 +15,22 @@ router.get('/:id', authorizeAccountAccess, accountController.getById);
 // POST /api/accounts - Create account
 router.post('/', accountController.create);
 
-// PATCH /api/accounts/:id/status - Update account status (Admin/Dev only)
-router.patch('/:id/status', authorizeAccountAccess, accountController.updateStatus);
+const requireAdminForOverdraft = (req, res, next) => {
+  const userRole = (req.user?.role || '').toUpperCase();
+  if (userRole !== 'ADMIN') {
+    return res.status(403).json({
+      success: false,
+      message: 'Unauthorized: Only Admin can modify overdraft settings and account limits.'
+    });
+  }
+  next();
+};
 
-// PATCH /api/accounts/:id/overdraft - Update overdraft settings (Admin/Dev only)
-router.patch('/:id/overdraft', authorizeAccountAccess, accountController.updateOverdraft);
+// PATCH /api/accounts/:id/status - Update account status (Admin only)
+router.patch('/:id/status', requireAdminForOverdraft, accountController.updateStatus);
+
+// PATCH /api/accounts/:id/overdraft - Update overdraft settings (Admin only)
+router.patch('/:id/overdraft', requireAdminForOverdraft, accountController.updateOverdraft);
 
 // GET /api/accounts/:id/balance - Get account balance (IDOR protected)
 router.get('/:id/balance', authorizeAccountAccess, accountController.getBalance);

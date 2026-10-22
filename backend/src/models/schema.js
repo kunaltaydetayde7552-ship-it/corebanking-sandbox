@@ -43,6 +43,7 @@ const initDatabase = async () => {
     await db.query(`
       CREATE TABLE IF NOT EXISTS transactions (
         id VARCHAR(50) PRIMARY KEY,
+        transfer_id VARCHAR(50),
         account_id VARCHAR(50) NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
         account_number VARCHAR(50) NOT NULL,
         type VARCHAR(20) NOT NULL,
@@ -55,6 +56,11 @@ const initDatabase = async () => {
         prev_hash TEXT DEFAULT 'GENESIS',
         hash TEXT
       );
+    `);
+
+    // Ensure transfer_id column exists if table was created previously
+    await db.query(`
+      ALTER TABLE transactions ADD COLUMN IF NOT EXISTS transfer_id VARCHAR(50);
     `);
 
     console.log('✅ PostgreSQL Schema initialized successfully on Neon.');
@@ -74,29 +80,31 @@ const initDatabase = async () => {
         ON CONFLICT (id) DO NOTHING;
       `);
 
-      // Seed Accounts
+      // Seed 5 Accounts (ACC-002 has overdraftEnabled: true with limit 50,000 as per PRD)
       await db.query(`
         INSERT INTO accounts (id, customer_id, account_number, account_type, balance, overdraft_enabled, overdraft_limit, status, created_at)
         VALUES
           ('ACC-001', 'CUST-001', '1001000001', 'savings', 50000.00, FALSE, 0.00, 'active', '2026-01-10T09:30:00.000Z'),
           ('ACC-002', 'CUST-001', '1001000002', 'current', 150000.00, TRUE, 50000.00, 'active', '2026-01-11T11:00:00.000Z'),
           ('ACC-003', 'CUST-002', '1001000003', 'savings', 75000.00, FALSE, 0.00, 'active', '2026-01-12T11:00:00.000Z'),
-          ('ACC-004', 'CUST-003', '1001000004', 'savings', 25000.00, FALSE, 0.00, 'active', '2026-01-15T15:00:00.000Z')
+          ('ACC-004', 'CUST-003', '1001000004', 'savings', 25000.00, FALSE, 0.00, 'active', '2026-01-15T15:00:00.000Z'),
+          ('ACC-005', 'CUST-002', '1001000005', 'current', 10000.00, FALSE, 0.00, 'active', '2026-01-16T12:00:00.000Z')
         ON CONFLICT (id) DO NOTHING;
       `);
 
-      // Seed Transactions
+      // Seed Transactions with transfer_id for transfers
       await db.query(`
-        INSERT INTO transactions (id, account_id, account_number, type, direction, amount, balance, description, reference_id, timestamp, prev_hash, hash)
+        INSERT INTO transactions (id, transfer_id, account_id, account_number, type, direction, amount, balance, description, reference_id, timestamp, prev_hash, hash)
         VALUES
-          ('TXN-001', 'ACC-001', '1001000001', 'deposit', 'credit', 60000.00, 60000.00, 'Initial account opening deposit', NULL, '2026-01-10T09:35:00.000Z', 'GENESIS', 'd42b9ad5682050647f8f4f649e596e89ff744d834a734d7691b49659c6ac1956'),
-          ('TXN-002', 'ACC-001', '1001000001', 'withdrawal', 'debit', 10000.00, 50000.00, 'ATM cash withdrawal', NULL, '2026-01-14T14:20:00.000Z', 'd42b9ad5682050647f8f4f649e596e89ff744d834a734d7691b49659c6ac1956', 'f9bfb4c219a5f4571e9e83e1615da9b723ac13cb6db8007b63e46ccf042528e4'),
-          ('TXN-003', 'ACC-002', '1001000002', 'deposit', 'credit', 200000.00, 200000.00, 'Business invoice payment deposit', NULL, '2026-01-11T11:15:00.000Z', 'f9bfb4c219a5f4571e9e83e1615da9b723ac13cb6db8007b63e46ccf042528e4', '4c587dc9ae2c130520a2f679b582e6631e09d358f1221cbb6abf9da0d6d3e073'),
-          ('TXN-004', 'ACC-002', '1001000002', 'withdrawal', 'debit', 50000.00, 150000.00, 'Vendor payment - Office equipment', NULL, '2026-01-16T16:45:00.000Z', '4c587dc9ae2c130520a2f679b582e6631e09d358f1221cbb6abf9da0d6d3e073', '0843abe58bdda657eadb7b14b5ef45719434c065b54c4852b081814ce2184301'),
-          ('TXN-005', 'ACC-003', '1001000003', 'deposit', 'credit', 70000.00, 70000.00, 'Initial account opening deposit', NULL, '2026-01-12T11:05:00.000Z', '0843abe58bdda657eadb7b14b5ef45719434c065b54c4852b081814ce2184301', 'a93f9ba2dd9d344f01b6976628f58512047e65d6a7dedc84457ce969152f0cff'),
-          ('TXN-006', 'ACC-004', '1001000004', 'deposit', 'credit', 30000.00, 30000.00, 'Initial savings deposit', NULL, '2026-01-15T15:05:00.000Z', 'a93f9ba2dd9d344f01b6976628f58512047e65d6a7dedc84457ce969152f0cff', '107372e3963202500f297388fb1e88e63744e2eab1a92b873533b7af9824259e'),
-          ('TXN-007', 'ACC-004', '1001000004', 'transfer', 'debit', 5000.00, 25000.00, 'Transfer to ACC-003 (Priya Patel)', 'ACC-003', '2026-01-18T10:10:00.000Z', '107372e3963202500f297388fb1e88e63744e2eab1a92b873533b7af9824259e', '65c3a242c7a5229c035d358fec7ee8cf05b521e09e44ff9ff2e8cef8fc3d6a86'),
-          ('TXN-008', 'ACC-003', '1001000003', 'transfer', 'credit', 5000.00, 75000.00, 'Transfer from ACC-004 (Amit Kumar)', 'ACC-004', '2026-01-18T10:10:00.000Z', '65c3a242c7a5229c035d358fec7ee8cf05b521e09e44ff9ff2e8cef8fc3d6a86', '6e7096f4d495ba133084012f003d48e6cf05e127308a21ac015fb4decb93660d')
+          ('TXN-001', NULL, 'ACC-001', '1001000001', 'deposit', 'credit', 60000.00, 60000.00, 'Initial account opening deposit', NULL, '2026-01-10T09:35:00.000Z', 'GENESIS', 'd42b9ad5682050647f8f4f649e596e89ff744d834a734d7691b49659c6ac1956'),
+          ('TXN-002', NULL, 'ACC-001', '1001000001', 'withdrawal', 'debit', 10000.00, 50000.00, 'ATM cash withdrawal', NULL, '2026-01-14T14:20:00.000Z', 'd42b9ad5682050647f8f4f649e596e89ff744d834a734d7691b49659c6ac1956', 'f9bfb4c219a5f4571e9e83e1615da9b723ac13cb6db8007b63e46ccf042528e4'),
+          ('TXN-003', NULL, 'ACC-002', '1001000002', 'deposit', 'credit', 200000.00, 200000.00, 'Business invoice payment deposit', NULL, '2026-01-11T11:15:00.000Z', 'f9bfb4c219a5f4571e9e83e1615da9b723ac13cb6db8007b63e46ccf042528e4', '4c587dc9ae2c130520a2f679b582e6631e09d358f1221cbb6abf9da0d6d3e073'),
+          ('TXN-004', NULL, 'ACC-002', '1001000002', 'withdrawal', 'debit', 50000.00, 150000.00, 'Vendor payment - Office equipment', NULL, '2026-01-16T16:45:00.000Z', '4c587dc9ae2c130520a2f679b582e6631e09d358f1221cbb6abf9da0d6d3e073', '0843abe58bdda657eadb7b14b5ef45719434c065b54c4852b081814ce2184301'),
+          ('TXN-005', NULL, 'ACC-003', '1001000003', 'deposit', 'credit', 70000.00, 70000.00, 'Initial account opening deposit', NULL, '2026-01-12T11:05:00.000Z', '0843abe58bdda657eadb7b14b5ef45719434c065b54c4852b081814ce2184301', 'a93f9ba2dd9d344f01b6976628f58512047e65d6a7dedc84457ce969152f0cff'),
+          ('TXN-006', NULL, 'ACC-004', '1001000004', 'deposit', 'credit', 30000.00, 30000.00, 'Initial savings deposit', NULL, '2026-01-15T15:05:00.000Z', 'a93f9ba2dd9d344f01b6976628f58512047e65d6a7dedc84457ce969152f0cff', '107372e3963202500f297388fb1e88e63744e2eab1a92b873533b7af9824259e'),
+          ('TXN-007', 'TRF-001', 'ACC-004', '1001000004', 'transfer', 'debit', 5000.00, 25000.00, 'Transfer to ACC-003 (Priya Patel)', 'ACC-003', '2026-01-18T10:10:00.000Z', '107372e3963202500f297388fb1e88e63744e2eab1a92b873533b7af9824259e', '65c3a242c7a5229c035d358fec7ee8cf05b521e09e44ff9ff2e8cef8fc3d6a86'),
+          ('TXN-008', 'TRF-001', 'ACC-003', '1001000003', 'transfer', 'credit', 5000.00, 75000.00, 'Transfer from ACC-004 (Amit Kumar)', 'ACC-004', '2026-01-18T10:10:00.000Z', '65c3a242c7a5229c035d358fec7ee8cf05b521e09e44ff9ff2e8cef8fc3d6a86', '6e7096f4d495ba133084012f003d48e6cf05e127308a21ac015fb4decb93660d'),
+          ('TXN-009', NULL, 'ACC-005', '1001000005', 'deposit', 'credit', 10000.00, 10000.00, 'Initial account opening deposit', NULL, '2026-01-16T12:05:00.000Z', '6e7096f4d495ba133084012f003d48e6cf05e127308a21ac015fb4decb93660d', '7d8a9b2c3d4e5f6a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a')
         ON CONFLICT (id) DO NOTHING;
       `);
       console.log('✅ Demo seed data populated in PostgreSQL.');
@@ -106,4 +114,65 @@ const initDatabase = async () => {
   }
 };
 
-module.exports = { initDatabase };
+/**
+ * Executes an atomic transaction to truncate and re-seed the PostgreSQL database (US-08)
+ */
+const resetDatabase = async () => {
+  if (!db.isDbConnected()) return;
+
+  const client = await db.getClient();
+  try {
+    console.log('🔄 Executing atomic PostgreSQL database reset (US-08)...');
+    await client.query('BEGIN');
+
+    // 1. Clear existing data
+    await client.query('TRUNCATE TABLE transactions CASCADE');
+    await client.query('TRUNCATE TABLE accounts CASCADE');
+    await client.query('TRUNCATE TABLE customers CASCADE');
+
+    // 2. Re-seed 3 Customers
+    await client.query(`
+      INSERT INTO customers (id, first_name, last_name, email, phone, address, date_of_birth, created_at)
+      VALUES
+        ('CUST-001', 'Rahul', 'Sharma', 'rahul.sharma@example.com', '9876543210', '123 MG Road, Mumbai', '1990-05-15', '2026-01-10T09:00:00.000Z'),
+        ('CUST-002', 'Priya', 'Patel', 'priya.patel@example.com', '9876543211', '456 Park Street, Delhi', '1988-11-22', '2026-01-12T10:30:00.000Z'),
+        ('CUST-003', 'Amit', 'Kumar', 'amit.kumar@example.com', '9876543212', '789 Lake View, Bangalore', '1995-03-08', '2026-01-15T14:15:00.000Z')
+    `);
+
+    // 3. Re-seed exact documented 5 Sample Accounts (ACC-002 has overdraft flag true, others false)
+    await client.query(`
+      INSERT INTO accounts (id, customer_id, account_number, account_type, balance, overdraft_enabled, overdraft_limit, status, created_at)
+      VALUES
+        ('ACC-001', 'CUST-001', '1001000001', 'savings', 50000.00, FALSE, 0.00, 'active', '2026-01-10T09:30:00.000Z'),
+        ('ACC-002', 'CUST-001', '1001000002', 'current', 150000.00, TRUE, 50000.00, 'active', '2026-01-11T11:00:00.000Z'),
+        ('ACC-003', 'CUST-002', '1001000003', 'savings', 75000.00, FALSE, 0.00, 'active', '2026-01-12T11:00:00.000Z'),
+        ('ACC-004', 'CUST-003', '1001000004', 'savings', 25000.00, FALSE, 0.00, 'active', '2026-01-15T15:00:00.000Z'),
+        ('ACC-005', 'CUST-002', '1001000005', 'current', 10000.00, FALSE, 0.00, 'active', '2026-01-16T12:00:00.000Z')
+    `);
+
+    // 4. Re-seed Transactions with transfer_id
+    await client.query(`
+      INSERT INTO transactions (id, transfer_id, account_id, account_number, type, direction, amount, balance, description, reference_id, timestamp, prev_hash, hash)
+      VALUES
+        ('TXN-001', NULL, 'ACC-001', '1001000001', 'deposit', 'credit', 60000.00, 60000.00, 'Initial account opening deposit', NULL, '2026-01-10T09:35:00.000Z', 'GENESIS', 'd42b9ad5682050647f8f4f649e596e89ff744d834a734d7691b49659c6ac1956'),
+        ('TXN-002', NULL, 'ACC-001', '1001000001', 'withdrawal', 'debit', 10000.00, 50000.00, 'ATM cash withdrawal', NULL, '2026-01-14T14:20:00.000Z', 'd42b9ad5682050647f8f4f649e596e89ff744d834a734d7691b49659c6ac1956', 'f9bfb4c219a5f4571e9e83e1615da9b723ac13cb6db8007b63e46ccf042528e4'),
+        ('TXN-003', NULL, 'ACC-002', '1001000002', 'deposit', 'credit', 200000.00, 200000.00, 'Business invoice payment deposit', NULL, '2026-01-11T11:15:00.000Z', 'f9bfb4c219a5f4571e9e83e1615da9b723ac13cb6db8007b63e46ccf042528e4', '4c587dc9ae2c130520a2f679b582e6631e09d358f1221cbb6abf9da0d6d3e073'),
+        ('TXN-004', NULL, 'ACC-002', '1001000002', 'withdrawal', 'debit', 50000.00, 150000.00, 'Vendor payment - Office equipment', NULL, '2026-01-16T16:45:00.000Z', '4c587dc9ae2c130520a2f679b582e6631e09d358f1221cbb6abf9da0d6d3e073', '0843abe58bdda657eadb7b14b5ef45719434c065b54c4852b081814ce2184301'),
+        ('TXN-005', NULL, 'ACC-003', '1001000003', 'deposit', 'credit', 70000.00, 70000.00, 'Initial account opening deposit', NULL, '2026-01-12T11:05:00.000Z', '0843abe58bdda657eadb7b14b5ef45719434c065b54c4852b081814ce2184301', 'a93f9ba2dd9d344f01b6976628f58512047e65d6a7dedc84457ce969152f0cff'),
+        ('TXN-006', NULL, 'ACC-004', '1001000004', 'deposit', 'credit', 30000.00, 30000.00, 'Initial savings deposit', NULL, '2026-01-15T15:05:00.000Z', 'a93f9ba2dd9d344f01b6976628f58512047e65d6a7dedc84457ce969152f0cff', '107372e3963202500f297388fb1e88e63744e2eab1a92b873533b7af9824259e'),
+        ('TXN-007', 'TRF-001', 'ACC-004', '1001000004', 'transfer', 'debit', 5000.00, 25000.00, 'Transfer to ACC-003 (Priya Patel)', 'ACC-003', '2026-01-18T10:10:00.000Z', '107372e3963202500f297388fb1e88e63744e2eab1a92b873533b7af9824259e', '65c3a242c7a5229c035d358fec7ee8cf05b521e09e44ff9ff2e8cef8fc3d6a86'),
+        ('TXN-008', 'TRF-001', 'ACC-003', '1001000003', 'transfer', 'credit', 5000.00, 75000.00, 'Transfer from ACC-004 (Amit Kumar)', 'ACC-004', '2026-01-18T10:10:00.000Z', '65c3a242c7a5229c035d358fec7ee8cf05b521e09e44ff9ff2e8cef8fc3d6a86', '6e7096f4d495ba133084012f003d48e6cf05e127308a21ac015fb4decb93660d'),
+        ('TXN-009', NULL, 'ACC-005', '1001000005', 'deposit', 'credit', 10000.00, 10000.00, 'Initial account opening deposit', NULL, '2026-01-16T12:05:00.000Z', '6e7096f4d495ba133084012f003d48e6cf05e127308a21ac015fb4decb93660d', '7d8a9b2c3d4e5f6a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a')
+    `);
+
+    await client.query('COMMIT');
+    console.log('✅ PostgreSQL database reset to 5 sample accounts & transactions.');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { initDatabase, resetDatabase };

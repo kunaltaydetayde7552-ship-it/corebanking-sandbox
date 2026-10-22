@@ -98,12 +98,24 @@ const getSeedData = () => {
       overdraftLimit: 0.00,
       status: 'active',
       createdAt: '2026-01-15T15:00:00.000Z'
+    },
+    {
+      id: 'ACC-005',
+      customerId: 'CUST-002',
+      accountNumber: '1001000005',
+      accountType: 'current',
+      balance: 10000.00,
+      overdraftEnabled: false,
+      overdraftLimit: 0.00,
+      status: 'active',
+      createdAt: '2026-01-16T12:00:00.000Z'
     }
   ];
 
   const rawTxns = [
     {
       id: 'TXN-001',
+      transferId: null,
       accountId: 'ACC-001',
       accountNumber: '1001000001',
       type: 'deposit',
@@ -116,6 +128,7 @@ const getSeedData = () => {
     },
     {
       id: 'TXN-002',
+      transferId: null,
       accountId: 'ACC-001',
       accountNumber: '1001000001',
       type: 'withdrawal',
@@ -128,6 +141,7 @@ const getSeedData = () => {
     },
     {
       id: 'TXN-003',
+      transferId: null,
       accountId: 'ACC-002',
       accountNumber: '1001000002',
       type: 'deposit',
@@ -140,6 +154,7 @@ const getSeedData = () => {
     },
     {
       id: 'TXN-004',
+      transferId: null,
       accountId: 'ACC-002',
       accountNumber: '1001000002',
       type: 'withdrawal',
@@ -152,6 +167,7 @@ const getSeedData = () => {
     },
     {
       id: 'TXN-005',
+      transferId: null,
       accountId: 'ACC-003',
       accountNumber: '1001000003',
       type: 'deposit',
@@ -164,6 +180,7 @@ const getSeedData = () => {
     },
     {
       id: 'TXN-006',
+      transferId: null,
       accountId: 'ACC-004',
       accountNumber: '1001000004',
       type: 'deposit',
@@ -176,6 +193,7 @@ const getSeedData = () => {
     },
     {
       id: 'TXN-007',
+      transferId: 'TRF-001',
       accountId: 'ACC-004',
       accountNumber: '1001000004',
       type: 'transfer',
@@ -188,6 +206,7 @@ const getSeedData = () => {
     },
     {
       id: 'TXN-008',
+      transferId: 'TRF-001',
       accountId: 'ACC-003',
       accountNumber: '1001000003',
       type: 'transfer',
@@ -197,6 +216,19 @@ const getSeedData = () => {
       description: 'Transfer from ACC-004 (Amit Kumar)',
       referenceId: 'ACC-004',
       timestamp: '2026-01-18T10:10:00.000Z'
+    },
+    {
+      id: 'TXN-009',
+      transferId: null,
+      accountId: 'ACC-005',
+      accountNumber: '1001000005',
+      type: 'deposit',
+      direction: 'credit',
+      amount: 10000.00,
+      balance: 10000.00,
+      description: 'Initial account opening deposit',
+      referenceId: null,
+      timestamp: '2026-01-16T12:05:00.000Z'
     }
   ];
 
